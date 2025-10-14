@@ -15,7 +15,10 @@ from .config import Config
 from .youtube_api import YouTubeClient, YouTubeAPIError
 from .database import DatabaseManager
 from .models import Channel, Video, ChangeDetection
-from .widgets import DashboardWidget, ChannelDetailWidget, VideoListWidget, TopFlopWidget
+from .widgets import (
+    DashboardWidget, ChannelDetailWidget, VideoListWidget, TopFlopWidget,
+    ChannelsListPanel, VideosListPanel, VideoDetailsPanel, MainViewPanel
+)
 
 # Version number for deployment tracking
 VERSION = "2.4.0"
@@ -162,6 +165,49 @@ class SuperTubeApp(App):
         width: 50%;
         height: 1fr;
     }
+
+    /* Lazydocker-style panel layout */
+    .left-sidebar {
+        width: 33%;
+        layout: vertical;
+        border-right: solid $primary;
+    }
+
+    .main-view-panel {
+        width: 67%;
+        padding: 0 2;
+    }
+
+    .channels-panel {
+        height: 33%;
+        border-bottom: solid $primary;
+        padding: 1;
+    }
+
+    .videos-panel {
+        height: 33%;
+        border-bottom: solid $primary;
+        padding: 1;
+    }
+
+    .details-panel {
+        height: 34%;
+        padding: 1;
+    }
+
+    .panel-title {
+        text-align: center;
+        padding: 0 0 1 0;
+        background: $panel;
+    }
+
+    .details-content {
+        padding: 1;
+    }
+
+    .main-view-content {
+        padding: 1;
+    }
     """
 
     TITLE = "SuperTube - YouTube Statistics"
@@ -207,9 +253,20 @@ class SuperTubeApp(App):
         self.topflop_metric = "views"  # metric
 
     def compose(self) -> ComposeResult:
-        """Create child widgets"""
+        """Create child widgets - Lazydocker-style layout"""
         yield Header()
-        yield Container(id="main_container")
+
+        # Main horizontal layout: left sidebar (1/3) + main view (2/3)
+        with Horizontal(id="main_container"):
+            # Left sidebar with 3 panels
+            with Vertical(classes="left-sidebar"):
+                yield ChannelsListPanel(classes="channels-panel", id="channels_panel")
+                yield VideosListPanel(classes="videos-panel", id="videos_panel")
+                yield VideoDetailsPanel(classes="details-panel", id="details_panel")
+
+            # Main view panel (right side)
+            yield MainViewPanel(classes="main-view-panel", id="main_view_panel")
+
         status = StatusBar()
         status.id = "status_bar"
         yield status
@@ -323,28 +380,70 @@ class SuperTubeApp(App):
         self.show_dashboard()
 
     def show_dashboard(self) -> None:
-        """Display the main dashboard with DataTable"""
+        """Display the main dashboard - Feed data to panels"""
         self.current_view = "dashboard"
-        container = self.query_one("#main_container", Container)
-        container.remove_children()
 
         if not self.channels_data:
-            container.mount(Label("No data loaded. Press 'r' to refresh.", classes="error"))
+            # Show error in main view if no data
+            try:
+                main_panel = self.query_one("#main_view_panel", MainViewPanel)
+                main_panel.query_one("#main_view_content").update(
+                    "[bold red]No data loaded. Press 'r' to refresh.[/bold red]"
+                )
+            except:
+                pass
             return
 
-        # Show change notifications if any
-        if self.changes_data:
-            changes_summary = self._build_changes_summary()
-            if changes_summary:
-                container.mount(Static(changes_summary, classes="success", id="changes_notification"))
-
-        # Create and mount dashboard widget
-        dashboard = DashboardWidget()
-        container.mount(dashboard)
-
-        # Load historical data and update dashboard
+        # Feed channels to ChannelsListPanel
         channels_list = list(self.channels_data.values())
-        self.load_dashboard_history(dashboard, channels_list)
+        try:
+            channels_panel = self.query_one("#channels_panel", ChannelsListPanel)
+            channels_panel.update_channels(channels_list)
+        except Exception as e:
+            self.status_bar.set_status(f"Error loading channels: {e}")
+
+        # Setup watchers for reactive updates
+        self._setup_panel_watchers()
+
+    def _setup_panel_watchers(self) -> None:
+        """Setup reactive connections between panels"""
+        try:
+            channels_panel = self.query_one("#channels_panel", ChannelsListPanel)
+
+            # Manually trigger initial selection
+            if channels_panel.selected_channel_id:
+                self._on_channel_selected(channels_panel.selected_channel_id)
+
+        except Exception as e:
+            self.status_bar.set_status(f"Error setting up panels: {e}")
+
+    def _on_channel_selected(self, channel_id: str) -> None:
+        """Callback when a channel is selected"""
+        try:
+            # Load videos for selected channel
+            videos = self.videos_data.get(channel_id, [])
+            videos_panel = self.query_one("#videos_panel", VideosListPanel)
+            videos_panel.update_videos(videos)
+
+            # Update main view with selected channel
+            channel = self.channels_data.get(channel_id)
+            main_panel = self.query_one("#main_view_panel", MainViewPanel)
+            main_panel.update_channel_context(channel)
+
+            # Store current channel
+            self.selected_channel_id = channel_id
+
+        except Exception as e:
+            self.status_bar.set_status(f"Error loading channel: {e}")
+
+    def _on_video_selected(self, video_id: str, video: Video) -> None:
+        """Callback when a video is selected"""
+        try:
+            details_panel = self.query_one("#details_panel", VideoDetailsPanel)
+            details_panel.update_video_details(video)
+
+        except Exception as e:
+            self.status_bar.set_status(f"Error showing video details: {e}")
 
     def _build_changes_summary(self) -> str:
         """Build a summary of all changes detected"""

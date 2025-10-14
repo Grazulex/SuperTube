@@ -667,3 +667,228 @@ class TopFlopWidget(Static):
             title = video.title[:37] + "..." if len(video.title) > 40 else video.title
 
             table.add_row(title, growth_str, current, key=video.id)
+
+
+# ============================================================================
+# NEW PANEL-BASED WIDGETS FOR LAZYDOCKER-STYLE LAYOUT
+# ============================================================================
+
+
+class ChannelsListPanel(Static):
+    """Left panel showing list of channels (lazydocker-style)"""
+
+    selected_channel_id = reactive(None)
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.channels: List[Channel] = []
+        self.can_focus = True
+
+    def compose(self) -> ComposeResult:
+        """Create child widgets"""
+        with Vertical():
+            yield Label("[bold cyan]📊 Channels[/bold cyan]", classes="panel-title")
+            yield DataTable(id="channels_panel_table", zebra_stripes=True, cursor_type="row")
+
+    def on_mount(self) -> None:
+        """Initialize the table"""
+        table = self.query_one("#channels_panel_table", DataTable)
+        table.add_column("Name", key="name", width=20)
+        table.add_column("Subs", key="subs", width=10)
+        table.focus()
+
+    def update_channels(self, channels: List[Channel]) -> None:
+        """Update the channels list"""
+        self.channels = channels
+        table = self.query_one("#channels_panel_table", DataTable)
+        table.clear(columns=False)
+
+        for channel in channels:
+            table.add_row(
+                channel.name[:18] + ".." if len(channel.name) > 20 else channel.name,
+                f"[green]{channel.subscriber_count // 1000}K[/green]",
+                key=channel.id
+            )
+
+        # Auto-select first channel
+        if channels and not self.selected_channel_id:
+            self.selected_channel_id = channels[0].id
+
+    def on_data_table_row_highlighted(self, event) -> None:
+        """Auto-select channel on navigation (lazydocker-style)"""
+        if event.cursor_row >= 0 and event.cursor_row < len(self.channels):
+            self.selected_channel_id = self.channels[event.cursor_row].id
+            # Notify app about selection change
+            if hasattr(self.app, '_on_channel_selected'):
+                self.app._on_channel_selected(self.selected_channel_id)
+
+
+class VideosListPanel(Static):
+    """Left panel showing videos of selected channel (lazydocker-style)"""
+
+    selected_video_id = reactive(None)
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.videos: List[Video] = []
+        self.can_focus = True
+
+    def compose(self) -> ComposeResult:
+        """Create child widgets"""
+        with Vertical():
+            yield Label("[bold cyan]🎬 Videos[/bold cyan]", classes="panel-title")
+            yield DataTable(id="videos_panel_table", zebra_stripes=True, cursor_type="row")
+
+    def on_mount(self) -> None:
+        """Initialize the table"""
+        table = self.query_one("#videos_panel_table", DataTable)
+        table.add_column("Title", key="title", width=25)
+        table.add_column("Views", key="views", width=8)
+
+    def update_videos(self, videos: List[Video]) -> None:
+        """Update the videos list"""
+        self.videos = videos
+        table = self.query_one("#videos_panel_table", DataTable)
+        table.clear(columns=False)
+
+        for video in videos[:50]:  # Limit to 50 most recent
+            # Add badge for recent videos
+            title = video.title
+            if video.is_recent:
+                badge = "🆕"
+                title = f"{badge} {title}"
+
+            # Truncate title
+            display_title = title[:23] + ".." if len(title) > 25 else title
+
+            table.add_row(
+                display_title,
+                f"[yellow]{video.view_count // 1000}K[/yellow]",
+                key=video.id
+            )
+
+        # Auto-select first video
+        if videos and not self.selected_video_id:
+            self.selected_video_id = videos[0].id
+
+    def on_data_table_row_highlighted(self, event) -> None:
+        """Auto-select video on navigation (lazydocker-style)"""
+        if event.cursor_row >= 0 and event.cursor_row < len(self.videos):
+            self.selected_video_id = self.videos[event.cursor_row].id
+            # Notify app about selection change
+            if hasattr(self.app, '_on_video_selected'):
+                self.app._on_video_selected(self.selected_video_id, self.videos[event.cursor_row])
+
+
+class VideoDetailsPanel(Static):
+    """Left panel showing details of selected video (lazydocker-style)"""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.current_video: Optional[Video] = None
+
+    def compose(self) -> ComposeResult:
+        """Create child widgets"""
+        with Vertical():
+            yield Label("[bold cyan]📋 Details[/bold cyan]", classes="panel-title")
+            yield Static(id="video_details_content", classes="details-content")
+
+    def update_video_details(self, video: Optional[Video]) -> None:
+        """Update the video details display"""
+        self.current_video = video
+        content = self.query_one("#video_details_content", Static)
+
+        if not video:
+            content.update("[dim]No video selected[/dim]")
+            return
+
+        # Calculate engagement
+        engagement_rate = (video.like_count / max(video.view_count, 1)) * 100
+
+        details = f"""[bold]{video.title[:30]}...[/bold]
+
+[dim]Published:[/dim]
+{video.published_at.strftime('%Y-%m-%d')}
+
+[dim]Duration:[/dim]
+{video.formatted_duration}
+
+[yellow]Views:[/yellow] {video.view_count:,}
+[green]Likes:[/green] {video.like_count:,}
+[blue]Comments:[/blue] {video.comment_count:,}
+
+[magenta]Engagement:[/magenta]
+{engagement_rate:.2f}%
+"""
+        content.update(details)
+
+
+class MainViewPanel(Static):
+    """Main right panel showing contextual views (lazydocker-style)"""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.current_mode = "dashboard"  # "dashboard", "topflop", etc.
+        self.current_channel: Optional[Channel] = None
+
+    def compose(self) -> ComposeResult:
+        """Create child widgets"""
+        with Vertical():
+            yield Static(id="main_view_content", classes="main-view-content")
+
+    def update_mode(self, mode: str) -> None:
+        """Switch between different view modes"""
+        self.current_mode = mode
+        self.refresh_view()
+
+    def update_channel_context(self, channel: Optional[Channel]) -> None:
+        """Update which channel is selected"""
+        self.current_channel = channel
+        self.refresh_view()
+
+    def refresh_view(self) -> None:
+        """Refresh the main view based on current mode and context"""
+        content = self.query_one("#main_view_content", Static)
+
+        if self.current_mode == "dashboard":
+            self._show_dashboard_view(content)
+        elif self.current_mode == "topflop":
+            self._show_topflop_view(content)
+        else:
+            content.update(f"[dim]Mode: {self.current_mode}[/dim]")
+
+    def _show_dashboard_view(self, content: Static) -> None:
+        """Show dashboard stats for selected channel"""
+        if not self.current_channel:
+            content.update("[dim]Select a channel to view stats[/dim]")
+            return
+
+        ch = self.current_channel
+        avg_views = ch.view_count // max(ch.video_count, 1)
+
+        dashboard = f"""[bold cyan]📊 Channel Statistics[/bold cyan]
+
+[bold]{ch.name}[/bold]
+
+[bold yellow]Overview:[/bold yellow]
+  Subscribers:  [green]{ch.subscriber_count:,}[/green]
+  Total Views:  [yellow]{ch.view_count:,}[/yellow]
+  Videos:       [blue]{ch.video_count:,}[/blue]
+
+[bold magenta]Performance:[/bold magenta]
+  Avg Views/Video:  [yellow]{avg_views:,}[/yellow]
+
+[bold cyan]Description:[/bold cyan]
+{ch.description[:300]}{'...' if len(ch.description) > 300 else ''}
+
+[dim]Press 't' for Top/Flop analysis[/dim]
+"""
+        content.update(dashboard)
+
+    def _show_topflop_view(self, content: Static) -> None:
+        """Show Top/Flop placeholder"""
+        content.update(
+            "[bold cyan]📈 Top/Flop Analysis[/bold cyan]\n\n"
+            "[yellow]Top/Flop widget will be integrated here[/yellow]\n"
+            "[dim]Press 'd' to return to dashboard[/dim]"
+        )

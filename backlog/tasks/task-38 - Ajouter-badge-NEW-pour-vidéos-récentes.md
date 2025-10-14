@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@claude'
 created_date: '2025-10-14 03:24'
-updated_date: '2025-10-14 03:26'
+updated_date: '2025-10-14 03:45'
 labels: []
 dependencies: []
 priority: medium
@@ -39,23 +39,33 @@ Ajouter un indicateur visuel (badge 🆕 ou 'NEW') pour les vidéos publiées de
 
 ## Changes Made
 
-### 1. Added video status properties to Video model (src/models.py:83-101)
-- is_recent property: Returns True if video published within last 7 days (excludes future/scheduled videos)
-- is_scheduled property: Returns True if video publication date is in the future
-- Both properties handle timezone-aware datetime objects correctly
+### 1. Added is_recent property to Video model (src/models.py:83-95)
+- Returns True if video published within last 7 days
+- Excludes future-dated videos
+- Handles timezone-aware datetime objects correctly
 
-### 2. Updated VideoListWidget to display badges (src/widgets.py:453-464)
-- 🆕 badge for recent videos (< 7 days old)
-- ⏰ badge for scheduled videos (future publication)
+### 2. Updated VideoListWidget to display 🆕 badge (src/widgets.py:453-463)
+- Badge appears before video title for recent videos (< 7 days)
 - Adjusted title truncation to account for badge length
-- Badges appear before video title in the list
+- Clean visual indicator without cluttering the UI
 
-## Features
+## API Limitation Discovered
+
+Initially planned to also add ⏰ badge for scheduled videos, but discovered that **YouTube Data API v3 does NOT provide access to regular scheduled videos** (even for channel owners). Only upcoming live streams and premieres can be retrieved.
+
+### Decision
+After discovering this limitation, removed the scheduled video feature entirely:
+- Removed scheduled video fetching from src/app.py
+- Simplified get_scheduled_videos() in src/youtube_api.py with API limitation documentation
+- Removed ⏰ badge logic from src/widgets.py
+
+## Final Features
 - **Recent videos (🆕)**: Videos published in the last 7 days
-- **Scheduled videos (⏰)**: Videos with future publication date
-- Clean visual indicators that don't clutter the UI
+- Scheduled videos feature abandoned due to YouTube API limitations
 
 ## Files Modified
-- src/models.py: Added is_recent and is_scheduled properties
-- src/widgets.py: Updated _refresh_table to display badges
+- src/models.py: Added is_recent property
+- src/widgets.py: Added 🆕 badge display
+- src/youtube_api.py: Documented API limitations for scheduled videos
+- src/app.py: Removed scheduled video fetching
 <!-- SECTION:NOTES:END -->
