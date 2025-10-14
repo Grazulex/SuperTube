@@ -996,7 +996,7 @@ class MainViewPanel(Static):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.current_mode = "dashboard"  # "dashboard", "topflop", "temporal", "comparison"
+        self.current_mode = "dashboard"  # "dashboard", "topflop", "temporal", "comparison", "titletag"
         self.current_channel: Optional[Channel] = None
         self.channel_history: Optional[List] = None
 
@@ -1011,6 +1011,8 @@ class MainViewPanel(Static):
             yield TemporalAnalysisPanel(id="temporal_panel")
             # Channel Comparison panel (visible in comparison mode)
             yield ChannelComparisonPanel(id="comparison_panel")
+            # Title/Tag Analysis panel (visible in titletag mode)
+            yield TitleTagAnalysisPanel(id="titletag_panel")
 
     def on_mount(self) -> None:
         """Initialize widget visibility based on mode"""
@@ -1034,27 +1036,38 @@ class MainViewPanel(Static):
             topflop = self.query_one("#topflop_widget", TopFlopWidget)
             temporal = self.query_one("#temporal_panel", TemporalAnalysisPanel)
             comparison = self.query_one("#comparison_panel", ChannelComparisonPanel)
+            titletag = self.query_one("#titletag_panel", TitleTagAnalysisPanel)
 
             if self.current_mode == "dashboard":
                 content.display = True
                 topflop.display = False
                 temporal.display = False
                 comparison.display = False
+                titletag.display = False
             elif self.current_mode == "topflop":
                 content.display = False
                 topflop.display = True
                 temporal.display = False
                 comparison.display = False
+                titletag.display = False
             elif self.current_mode == "temporal":
                 content.display = False
                 topflop.display = False
                 temporal.display = True
                 comparison.display = False
+                titletag.display = False
             elif self.current_mode == "comparison":
                 content.display = False
                 topflop.display = False
                 temporal.display = False
                 comparison.display = True
+                titletag.display = False
+            elif self.current_mode == "titletag":
+                content.display = False
+                topflop.display = False
+                temporal.display = False
+                comparison.display = False
+                titletag.display = True
         except:
             pass
 
@@ -1071,6 +1084,8 @@ class MainViewPanel(Static):
             self._show_temporal_view()
         elif self.current_mode == "comparison":
             self._show_comparison_view()
+        elif self.current_mode == "titletag":
+            self._show_titletag_view()
         else:
             content = self.query_one("#main_view_content", Static)
             content.update(f"[dim]Mode: {self.current_mode}[/dim]")
@@ -1221,6 +1236,22 @@ Change: [{views_color}]{views_sign}{views_change:,}[/{views_color}] ([{views_col
                 # Show placeholder
                 comparison.query_one("#comparison_controls", Static).update(
                     "[yellow]Loading comparison data...[/yellow]"
+                )
+        except Exception:
+            pass
+
+    def _show_titletag_view(self) -> None:
+        """Show Title/Tag Analysis panel with data"""
+        try:
+            titletag = self.query_one("#titletag_panel", TitleTagAnalysisPanel)
+
+            # Trigger data loading from app if we have a channel selected
+            if self.current_channel and hasattr(self.app, 'load_titletag_data'):
+                self.app.load_titletag_data(self.current_channel.id, titletag)
+            else:
+                # No channel selected - show placeholder
+                titletag.query_one("#titletag_content", Static).update(
+                    "[yellow]Select a channel to view title/tag analysis[/yellow]"
                 )
         except Exception:
             pass
@@ -1485,3 +1516,67 @@ class ChannelComparisonPanel(Static):
             "views": "Avg Views"
         }
         return f"Sorted by {metric_labels[self.sort_metric]}"
+
+
+class TitleTagAnalysisPanel(Static):
+    """Panel showing title and tag analysis insights"""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.insights = None
+
+    def compose(self) -> ComposeResult:
+        """Create child widgets"""
+        with Vertical():
+            yield Label("[bold cyan]📝 Title & Tag Analysis[/bold cyan]", classes="panel-title")
+            yield Static(id="titletag_content", classes="details-content")
+
+    def update_insights(self, insights) -> None:
+        """Update the title/tag analysis display"""
+        self.insights = insights
+        content = self.query_one("#titletag_content", Static)
+
+        if not insights or insights.analyzed_video_count == 0:
+            content.update("[dim]Not enough data for title/tag analysis[/dim]")
+            return
+
+        # Build display sections
+        sections = []
+
+        # Title patterns section
+        pattern = insights.title_pattern
+        sections.append(
+            f"[bold yellow]📊 Title Patterns ({insights.analyzed_video_count} videos analyzed):[/bold yellow]\n"
+            f"Average Length: [cyan]{pattern.avg_length:.0f}[/cyan] characters\n"
+            f"Average Words: [cyan]{pattern.avg_word_count:.0f}[/cyan] words\n"
+            f"Best Length: [green]{pattern.length_correlation.title()}[/green] titles perform better"
+        )
+
+        # Top keywords section
+        if pattern.top_keywords:
+            kw_lines = ["[bold]🔑 Top Performing Keywords:[/bold]"]
+            for i, (keyword, score) in enumerate(pattern.top_keywords[:10], 1):
+                # Color code by score
+                if score >= 7.0:
+                    color = "green"
+                elif score >= 4.0:
+                    color = "yellow"
+                else:
+                    color = "white"
+                kw_lines.append(f"{i:2d}. [{color}]{keyword}[/{color}] (Score: {score:.1f})")
+            sections.append("\n".join(kw_lines))
+
+        # Common words section (most frequent)
+        if pattern.common_words:
+            common_lines = ["[bold]💬 Most Common Words:[/bold]"]
+            for i, (word, count) in enumerate(pattern.common_words[:8], 1):
+                common_lines.append(f"{i}. {word} ({count}x)")
+            sections.append("\n".join(common_lines))
+
+        # Suggested keywords
+        if insights.suggested_keywords:
+            suggested = ", ".join(insights.suggested_keywords[:8])
+            sections.append(f"[bold green]✨ Suggested Keywords:[/bold green]\n{suggested}")
+
+        content.update("\n\n".join(sections))
+

@@ -1,11 +1,11 @@
 ---
 id: task-22
 title: Tableau de comparaison de performances entre chaînes
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2025-10-13 22:45'
-updated_date: '2025-10-14 21:10'
+updated_date: '2025-10-14 21:13'
 labels: []
 dependencies: []
 priority: medium

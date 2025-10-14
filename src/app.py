@@ -18,10 +18,11 @@ from .models import Channel, Video, ChangeDetection, ChannelComparison
 from .widgets import (
     DashboardWidget, ChannelDetailWidget, VideoListWidget, TopFlopWidget,
     ChannelsListPanel, VideosListPanel, VideoDetailsPanel, MainViewPanel,
-    TemporalAnalysisPanel, ChannelComparisonPanel
+    TemporalAnalysisPanel, ChannelComparisonPanel, TitleTagAnalysisPanel
 )
 from .alerts import AlertManager
 from .temporal_analysis import TemporalAnalyzer
+from .title_tag_analyzer import TitleTagAnalyzer
 
 # Version number for deployment tracking
 VERSION = "2.4.0"
@@ -226,6 +227,7 @@ class SuperTubeApp(App):
         Binding("t", "show_topflop", "Top/Flop"),
         Binding("a", "show_temporal", "Temporal"),
         Binding("c", "show_comparison", "Compare"),
+        Binding("w", "show_titletag", "Title/Tags"),
         Binding("f", "cycle_filter", "Filter"),
         Binding("escape", "back", "Back"),
         # Vim-style navigation
@@ -863,6 +865,18 @@ class SuperTubeApp(App):
         except Exception as e:
             self.status_bar.set_status(f"Error: {e}")
 
+    def action_show_titletag(self) -> None:
+        """Show Title/Tag Analysis in main panel"""
+        if self.current_view != "dashboard":
+            return
+
+        try:
+            main_panel = self.query_one("#main_view_panel", MainViewPanel)
+            main_panel.update_mode("titletag")
+            self.status_bar.set_status("Showing Title/Tag Analysis - Keywords and patterns")
+        except Exception as e:
+            self.status_bar.set_status(f"Error: {e}")
+
     def action_cycle_period(self) -> None:
         """Cycle through period options in Top/Flop view"""
         # Check if main panel is in topflop mode
@@ -1348,6 +1362,29 @@ class SuperTubeApp(App):
 
             # Update widget
             self.call_after_refresh(widget.update_comparisons, comparisons)
+        except Exception as e:
+            # Silently fail
+            pass
+
+    @work(exclusive=False)
+    async def load_titletag_data(self, channel_id: str, widget) -> None:
+        """Load and analyze title/tag patterns for channel videos"""
+        try:
+            channel = self.channels_data.get(channel_id)
+            if not channel:
+                return
+
+            # Get all videos for this channel
+            videos = self.videos_data.get(channel_id, [])
+            if not videos:
+                return
+
+            # Run title/tag analysis
+            analyzer = TitleTagAnalyzer(videos, performance_threshold_percentile=0.6)
+            insights = analyzer.generate_insights(channel.name)
+
+            # Update widget
+            self.call_after_refresh(widget.update_insights, insights)
         except Exception as e:
             # Silently fail
             pass

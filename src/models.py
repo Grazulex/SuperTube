@@ -537,3 +537,47 @@ class ChannelComparison:
         normalized_growth = min(abs(self.subscriber_growth_percent) / 10, 10.0)  # Cap at 100% = 10 points
 
         return (normalized_engagement * 0.3) + (normalized_growth * 0.3) + (normalized_views * 0.4)
+
+
+@dataclass
+class TitlePattern:
+    """Analysis of title patterns from successful videos"""
+    avg_length: float  # Average title length in characters
+    avg_word_count: float  # Average number of words
+    common_words: List[tuple[str, int]]  # (word, frequency) tuples
+    top_keywords: List[tuple[str, float]]  # (keyword, avg_performance_score) tuples
+    length_correlation: str  # "short", "medium", "long" - best performing length
+
+    def get_summary(self) -> str:
+        """Get human-readable summary"""
+        top_3_keywords = ", ".join([kw for kw, _ in self.top_keywords[:3]])
+        return f"Avg length: {self.avg_length:.0f} chars, {self.avg_word_count:.0f} words | Top keywords: {top_3_keywords}"
+
+
+@dataclass
+class TagAnalysis:
+    """Analysis of tag usage and performance"""
+    tag: str
+    frequency: int  # Number of videos with this tag
+    avg_views: float  # Average views for videos with this tag
+    avg_engagement: float  # Average engagement rate
+    performance_score: float  # Weighted performance score
+
+    def __lt__(self, other):
+        """Enable sorting by performance score"""
+        return self.performance_score < other.performance_score
+
+
+@dataclass
+class TitleTagInsights:
+    """Combined insights from title and tag analysis"""
+    channel_name: str
+    analyzed_video_count: int
+    title_pattern: TitlePattern
+    top_tags: List[TagAnalysis]  # Top performing tags
+    suggested_tags: List[str]  # Suggested tags based on high-performing videos
+    suggested_keywords: List[str]  # Suggested keywords for titles
+
+    def get_summary(self) -> str:
+        """Get human-readable summary"""
+        return f"Analyzed {self.analyzed_video_count} videos | {self.title_pattern.get_summary()}"
