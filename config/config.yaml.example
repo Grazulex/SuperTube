@@ -1,0 +1,37 @@
+# SuperTube Configuration File
+# Copy this file to config.yaml and fill in your YouTube channel IDs
+
+# How to find your YouTube channel ID:
+# 1. Go to YouTube Studio (studio.youtube.com)
+# 2. Click on "Settings" > "Channel" > "Advanced settings"
+# 3. Copy the "Channel ID"
+# OR
+# 1. Go to your channel page
+# 2. Look at the URL: youtube.com/channel/YOUR_CHANNEL_ID_HERE
+
+channels:
+  # Channel 1
+  - name: "Dreamy & Psychedelic Chill"
+    channel_id: "UCcgPbwx-dix51ylCktB6-Qw"
+    description: "Music Channel"
+
+  # Channel 2
+  - name: "World in Numbers"
+    channel_id: "UC0u-skG-CxV0NAk87ioIMqA"
+    description: "Economic Channel"
+
+  # Channel 3
+  - name: "ChronikA – L’Histoire autrement"
+    channel_id: "UCu-e0vJqOGFF2__Y2kObl5Q"
+    description: "Historical Channel"
+
+# Application settings
+settings:
+  # Cache duration in seconds (default: 1 hour)
+  cache_ttl: 3600
+
+  # Number of recent videos to fetch per channel
+  max_videos: 50
+
+  # Auto-refresh interval in seconds (0 = disabled)
+  auto_refresh: 0

@@ -1,0 +1,15 @@
+services:
+  supertube:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: supertube:latest
+    container_name: supertube
+    stdin_open: true  # Enable stdin for interactive TUI
+    tty: true         # Enable TTY for Textual
+    environment:
+      - TERM=xterm-256color
+    volumes:
+      - ./config:/app/config     # Mount config directory (needs write access for token.pickle)
+      - ./data:/app/data         # Mount data directory for SQLite cache
+    restart: "no"  # Don't auto-restart (it's an interactive app)
