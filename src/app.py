@@ -217,18 +217,14 @@ class SuperTubeApp(App):
         Binding("q", "quit", "Quit", priority=True),
         Binding("r", "refresh", "Refresh", priority=True),
         Binding("?", "help", "Help"),
+        Binding("tab", "next_panel", "Next Panel"),
         Binding("d", "dashboard", "Dashboard"),
         Binding("s", "cycle_sort", "Sort"),
         Binding("t", "show_topflop", "Top/Flop"),
-        Binding("enter", "select_channel", show=False),  # Hidden binding for non-DataTable views
         Binding("escape", "back", "Back"),
         # Vim-style navigation
         Binding("j", "cursor_down", "Down", show=False),
         Binding("k", "cursor_up", "Up", show=False),
-        # Channel shortcuts
-        Binding("1", "goto_channel_1", "Channel 1", show=False),
-        Binding("2", "goto_channel_2", "Channel 2", show=False),
-        Binding("3", "goto_channel_3", "Channel 3", show=False),
         # Video URL copy
         Binding("y", "copy_video_url", "Copy URL", show=False),
         # Top/Flop controls (shown in context)
@@ -487,59 +483,84 @@ class SuperTubeApp(App):
 [bold]Main Navigation:[/bold]
   q          - Quit application
   r          - Refresh data from YouTube (collects today's stats if not done)
-  d          - Return to Dashboard
-  ESC        - Go back to previous screen
+  Tab        - Switch between panels (Channels ⇄ Videos)
   ?          - Show this help
+  ESC        - Back to previous screen
 
-[bold]Quick Channel Access:[/bold]
-  1          - Jump to first channel details
-  2          - Jump to second channel details
-  3          - Jump to third channel details
+[bold]New Panel Layout:[/bold]
+  Left panels show: Channels → Videos → Video Details
+  Right panel shows: Channel stats, Top/Flop analysis, etc.
 
-[bold]Dashboard:[/bold]
-  ↑/↓ or j/k - Navigate between channels (vim-style)
-  s          - Cycle sort order (subscribers → views → videos → name)
-  t          - Show Top/Flop video analysis for selected channel
-  ENTER      - View selected channel details
+  Navigation is automatic - just use ↑↓ to select!
+  Selected channel → loads videos automatically
+  Selected video → shows details automatically
 
-[bold]Channel Details:[/bold]
-  ENTER      - View all videos
-  t          - Show Top/Flop video analysis
-  ESC        - Back to Dashboard
+[bold]Panel Commands:[/bold]
+  ↑/↓ or j/k - Navigate in current panel (auto-selects)
+  Tab        - Switch between Channels and Videos panels
+  t          - Show Top/Flop analysis in main view
+  d          - Return to Dashboard view in main panel
+  y          - Show video URL (when video selected)
 
 [bold]Top/Flop Analysis:[/bold]
   p          - Cycle period (7d → 30d → 90d)
   m          - Cycle metric (views → likes → comments → engagement)
-  ESC        - Back to Dashboard
-
-[bold]Video List:[/bold]
-  ↑/↓ or j/k - Navigate through videos (vim-style)
-  /          - Focus search input (filter videos by title)
-  s          - Cycle sort order (views → likes → comments → date → engagement)
-  t          - Show Top/Flop video analysis
-  y          - Show video URL (displayed in status bar for copying)
-  ENTER      - View video details
-  ESC        - Back to Dashboard
-
-[bold]Video Details:[/bold]
-  y          - Show video URL (displayed in status bar for copying)
-  ESC        - Back to Video List
+  d          - Back to Dashboard view
 
 [bold]Status Bar:[/bold]
-  Shows last update time, current status, and change notifications
+  Shows last update time, current status, and notifications
 
 [bold cyan]💡 Pro Tips:[/bold cyan]
+  • Everything is visible at once - no more back/forth!
+  • Just navigate with arrows - selection is automatic
+  • Use Tab to switch between panels
   • Stats are collected automatically once per day
   • Green notifications show new videos and stat changes
-  • Graphs appear after collecting 2+ days of data
 
-[dim]Press ESC to return to dashboard...[/dim]
+[dim]Press ESC or 'd' to return to dashboard...[/dim]
         """
         container.mount(Static(help_text, classes="box"))
 
     def action_dashboard(self) -> None:
-        """Return to dashboard"""
-        self.show_dashboard()
+        """Return to dashboard or switch main panel to dashboard mode"""
+        if self.current_view == "dashboard":
+            # Already in dashboard - just switch main panel to dashboard mode
+            try:
+                main_panel = self.query_one("#main_view_panel", MainViewPanel)
+                main_panel.update_mode("dashboard")
+                self.status_bar.set_status("Dashboard view")
+            except:
+                pass
+        else:
+            # Go back to dashboard
+            self.show_dashboard()
+
+    def action_next_panel(self) -> None:
+        """Navigate to next panel (Tab key)"""
+        if self.current_view != "dashboard":
+            return
+
+        try:
+            # Get the 3 focusable panels in order
+            channels_panel = self.query_one("#channels_panel", ChannelsListPanel)
+            videos_panel = self.query_one("#videos_panel", VideosListPanel)
+
+            # Find which panel has focus
+            if channels_panel.has_focus or channels_panel.query_one("#channels_panel_table").has_focus:
+                # Move to videos panel
+                videos_table = videos_panel.query_one("#videos_panel_table")
+                videos_table.focus()
+            elif videos_panel.has_focus or videos_panel.query_one("#videos_panel_table").has_focus:
+                # Move back to channels panel (cycle)
+                channels_table = channels_panel.query_one("#channels_panel_table")
+                channels_table.focus()
+            else:
+                # Default: focus channels panel
+                channels_table = channels_panel.query_one("#channels_panel_table")
+                channels_table.focus()
+
+        except Exception as e:
+            self.status_bar.set_status(f"Tab navigation error: {e}")
 
     def action_select_channel(self) -> None:
         """View details of selected channel or video"""
@@ -586,13 +607,17 @@ class SuperTubeApp(App):
 
     def action_back(self) -> None:
         """Go back to previous view"""
-        if self.current_view == "video_detail" and self.selected_channel_id:
-            # Go back to video list
-            self.show_video_list(self.selected_channel_id)
-        elif self.current_view in ["channel_detail", "video_list", "topflop"]:
+        if self.current_view == "help":
+            # Return to dashboard from help
             self.show_dashboard()
-        elif self.current_view == "help":
-            self.show_dashboard()
+        elif self.current_view == "dashboard":
+            # In dashboard, ESC switches main panel back to dashboard mode
+            try:
+                main_panel = self.query_one("#main_view_panel", MainViewPanel)
+                main_panel.update_mode("dashboard")
+                self.status_bar.set_status("Dashboard view")
+            except:
+                pass
 
     def action_cursor_down(self) -> None:
         """Move cursor down (vim j key)"""
@@ -643,56 +668,37 @@ class SuperTubeApp(App):
             self.show_channel_details(channel.id)
 
     def action_cycle_sort(self) -> None:
-        """Cycle through sort options in dashboard or video list"""
+        """Cycle through sort options in focused panel"""
+        if self.current_view != "dashboard":
+            return
+
         try:
-            container = self.query_one("#main_container", Container)
+            # Check which panel has focus and sort accordingly
+            channels_panel = self.query_one("#channels_panel", ChannelsListPanel)
+            videos_panel = self.query_one("#videos_panel", VideosListPanel)
 
-            if self.current_view == "dashboard":
-                # Handle dashboard sorting
-                dashboard = container.query_one(DashboardWidget)
+            # Try channels panel first
+            try:
+                channels_table = channels_panel.query_one("#channels_panel_table")
+                if channels_table.has_focus:
+                    # Sort channels - we need to implement sorting in ChannelsListPanel
+                    self.status_bar.set_status("Channel sorting not yet implemented in panel view")
+                    return
+            except:
+                pass
 
-                # Cycle through sort keys
-                sort_keys = ["subscribers", "views", "videos", "name"]
-                current_key = dashboard.sort_key
-                current_index = sort_keys.index(current_key) if current_key in sort_keys else 0
-                next_key = sort_keys[(current_index + 1) % len(sort_keys)]
+            # Try videos panel
+            try:
+                videos_table = videos_panel.query_one("#videos_panel_table")
+                if videos_table.has_focus:
+                    # Sort videos - we need to implement sorting in VideosListPanel
+                    self.status_bar.set_status("Video sorting not yet implemented in panel view")
+                    return
+            except:
+                pass
 
-                # Update sort
-                dashboard.change_sort(next_key)
-
-                # Show notification
-                sort_names = {
-                    "subscribers": "Subscribers",
-                    "views": "Total Views",
-                    "videos": "Video Count",
-                    "name": "Name (A-Z)"
-                }
-                self.status_bar.set_status(f"Dashboard sorted by: {sort_names[next_key]}")
-
-            elif self.current_view == "video_list":
-                # Handle video list sorting
-                video_list = container.query_one(VideoListWidget)
-
-                # Cycle through sort keys
-                sort_keys = ["views", "likes", "comments", "date", "engagement"]
-                current_key = video_list.sort_key
-                current_index = sort_keys.index(current_key) if current_key in sort_keys else 0
-                next_key = sort_keys[(current_index + 1) % len(sort_keys)]
-
-                # Update sort
-                video_list.change_sort(next_key)
-
-                # Show notification
-                sort_names = {
-                    "views": "Views",
-                    "likes": "Likes",
-                    "comments": "Comments",
-                    "date": "Date",
-                    "engagement": "Engagement"
-                }
-                self.status_bar.set_status(f"Sorted by: {sort_names[next_key]}")
-        except:
-            pass
+        except Exception as e:
+            self.status_bar.set_status(f"Sort error: {e}")
 
     def action_focus_search(self) -> None:
         """Focus the search input in video list"""
@@ -730,21 +736,16 @@ class SuperTubeApp(App):
             self.status_bar.set_status(f"Error: {e}")
 
     def action_show_topflop(self) -> None:
-        """Show Top/Flop analysis view"""
-        if self.current_view == "dashboard":
-            # Get selected channel from dashboard
-            try:
-                container = self.query_one("#main_container", Container)
-                dashboard = container.query_one(DashboardWidget)
-                channel_id = dashboard.get_selected_channel_id()
-                if channel_id:
-                    self.show_topflop_view(channel_id)
-            except:
-                pass
-        elif self.current_view in ["channel_detail", "video_list"]:
-            # Use currently selected channel
-            if self.selected_channel_id:
-                self.show_topflop_view(self.selected_channel_id)
+        """Show Top/Flop analysis in main panel"""
+        if self.current_view != "dashboard":
+            return
+
+        try:
+            main_panel = self.query_one("#main_view_panel", MainViewPanel)
+            main_panel.update_mode("topflop")
+            self.status_bar.set_status("Showing Top/Flop analysis (use 'p' and 'm' to cycle period/metric)")
+        except Exception as e:
+            self.status_bar.set_status(f"Error: {e}")
 
     def action_cycle_period(self) -> None:
         """Cycle through period options in Top/Flop view"""
