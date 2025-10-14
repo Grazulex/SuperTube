@@ -292,25 +292,11 @@ class SuperTubeApp(App):
                         channel_config.channel_id
                     )
 
-                    # Get published videos
                     videos = await asyncio.to_thread(
                         self.youtube_client.get_channel_videos,
                         channel_config.channel_id,
                         self.config.settings.max_videos
                     )
-
-                    # Get scheduled videos (only works for authenticated user's channels)
-                    try:
-                        scheduled = await asyncio.to_thread(
-                            self.youtube_client.get_scheduled_videos,
-                            channel_config.channel_id,
-                            50
-                        )
-                        if scheduled:
-                            videos.extend(scheduled)
-                    except Exception:
-                        # Silently ignore if we can't get scheduled videos
-                        pass
 
                     # Detect changes before saving
                     changes = await self.db.detect_changes(channel_config.channel_id, channel, videos)

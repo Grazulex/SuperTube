@@ -450,17 +450,16 @@ class VideoListWidget(Static):
             # Calculate engagement rate (likes/views)
             engagement = (video.like_count / max(video.view_count, 1)) * 100
 
-            # Add badge for recent or scheduled videos
+            # Add badge for recent videos
             title = video.title
-            if video.is_scheduled:
-                badge = "[dim]⏰[/dim] "
-            elif video.is_recent:
+            if video.is_recent:
                 badge = "🆕 "
+                max_title_len = 47
             else:
                 badge = ""
+                max_title_len = 50
 
             # Truncate title considering badge
-            max_title_len = 47 if badge else 50
             display_title = badge + (title[:max_title_len] + "..." if len(title) > max_title_len else title)
 
             table.add_row(
