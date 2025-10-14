@@ -520,3 +520,151 @@ class VideoListWidget(Static):
                     self.app.status_bar.set_status(f"Video URL: {url}")
             event.prevent_default()
             event.stop()
+
+
+class TopFlopWidget(Static):
+    """Widget displaying top and bottom performing videos over a period"""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.channel_name = ""
+        self.period_days = 7
+        self.metric = "views"
+
+    def compose(self) -> ComposeResult:
+        """Create child widgets"""
+        with Vertical():
+            yield Static(id="topflop_title", classes="section-title")
+            yield Static(id="topflop_controls", classes="stats-box")
+            with Horizontal():
+                yield DataTable(id="top_videos_table", zebra_stripes=True)
+                yield DataTable(id="bottom_videos_table", zebra_stripes=True)
+
+    def on_mount(self) -> None:
+        """Initialize the tables"""
+        self._setup_tables()
+
+    def _setup_tables(self) -> None:
+        """Setup table columns"""
+        # Top videos table
+        top_table = self.query_one("#top_videos_table", DataTable)
+        if not top_table.columns:
+            top_table.add_column("🏆 Top Performers", key="title", width=40)
+            top_table.add_column("Growth", key="growth", width=15)
+            top_table.add_column("Current", key="current", width=15)
+
+        # Bottom videos table
+        bottom_table = self.query_one("#bottom_videos_table", DataTable)
+        if not bottom_table.columns:
+            bottom_table.add_column("📉 Bottom Performers", key="title", width=40)
+            bottom_table.add_column("Growth", key="growth", width=15)
+            bottom_table.add_column("Current", key="current", width=15)
+
+    def update_data(
+        self,
+        channel_name: str,
+        top_videos: List[tuple[Video, float]],
+        bottom_videos: List[tuple[Video, float]],
+        period_days: int,
+        metric: str
+    ) -> None:
+        """Update the widget with top/flop video data"""
+        self.channel_name = channel_name
+        self.period_days = period_days
+        self.metric = metric
+
+        # Update title
+        title_widget = self.query_one("#topflop_title", Static)
+        period_labels = {7: "7 days", 30: "30 days", 90: "90 days"}
+        metric_labels = {"views": "Views", "likes": "Likes", "comments": "Comments", "engagement": "Engagement"}
+        title_widget.update(
+            f"📊 Top/Flop Videos - {channel_name} | "
+            f"Period: {period_labels.get(period_days, f'{period_days}d')} | "
+            f"Metric: {metric_labels.get(metric, metric)}"
+        )
+
+        # Update controls info
+        controls = self.query_one("#topflop_controls", Static)
+        controls.update(
+            "[dim]Press 'p' to cycle period (7d → 30d → 90d) | "
+            "Press 'm' to cycle metric (views → likes → comments → engagement) | "
+            "ESC to go back[/dim]"
+        )
+
+        # Update top videos table
+        self._update_top_table(top_videos)
+
+        # Update bottom videos table
+        self._update_bottom_table(bottom_videos)
+
+    def _update_top_table(self, videos: List[tuple[Video, float]]) -> None:
+        """Update top performers table"""
+        table = self.query_one("#top_videos_table", DataTable)
+        table.clear(columns=False)
+
+        if not videos:
+            table.add_row(
+                "[dim]Not enough data yet[/dim]",
+                "[dim]—[/dim]",
+                "[dim]—[/dim]"
+            )
+            return
+
+        for video, growth in videos:
+            # Format growth value based on metric
+            if self.metric == "engagement":
+                growth_str = f"[green]+{growth:.2f}%[/green]" if growth > 0 else f"[red]{growth:.2f}%[/red]"
+            else:
+                growth_str = f"[green]+{int(growth):,}[/green]" if growth > 0 else f"[red]{int(growth):,}[/red]"
+
+            # Get current value
+            if self.metric == "views":
+                current = f"[yellow]{video.view_count:,}[/yellow]"
+            elif self.metric == "likes":
+                current = f"[green]{video.like_count:,}[/green]"
+            elif self.metric == "comments":
+                current = f"[blue]{video.comment_count:,}[/blue]"
+            else:  # engagement
+                eng_rate = video.engagement_rate
+                current = f"[magenta]{eng_rate:.2f}%[/magenta]"
+
+            # Truncate title
+            title = video.title[:37] + "..." if len(video.title) > 40 else video.title
+
+            table.add_row(title, growth_str, current, key=video.id)
+
+    def _update_bottom_table(self, videos: List[tuple[Video, float]]) -> None:
+        """Update bottom performers table"""
+        table = self.query_one("#bottom_videos_table", DataTable)
+        table.clear(columns=False)
+
+        if not videos:
+            table.add_row(
+                "[dim]Not enough data yet[/dim]",
+                "[dim]—[/dim]",
+                "[dim]—[/dim]"
+            )
+            return
+
+        for video, growth in videos:
+            # Format growth value based on metric
+            if self.metric == "engagement":
+                growth_str = f"[green]+{growth:.2f}%[/green]" if growth > 0 else f"[red]{growth:.2f}%[/red]"
+            else:
+                growth_str = f"[green]+{int(growth):,}[/green]" if growth > 0 else f"[red]{int(growth):,}[/red]"
+
+            # Get current value
+            if self.metric == "views":
+                current = f"[yellow]{video.view_count:,}[/yellow]"
+            elif self.metric == "likes":
+                current = f"[green]{video.like_count:,}[/green]"
+            elif self.metric == "comments":
+                current = f"[blue]{video.comment_count:,}[/blue]"
+            else:  # engagement
+                eng_rate = video.engagement_rate
+                current = f"[magenta]{eng_rate:.2f}%[/magenta]"
+
+            # Truncate title
+            title = video.title[:37] + "..." if len(video.title) > 40 else video.title
+
+            table.add_row(title, growth_str, current, key=video.id)

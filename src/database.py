@@ -468,3 +468,127 @@ class DatabaseManager:
             updated_videos=updated_videos,
             channel_changes=channel_changes
         )
+
+    async def get_top_videos_by_growth(
+        self,
+        channel_id: str,
+        days: int = 7,
+        metric: str = "views",
+        limit: int = 10
+    ) -> List[tuple[Video, float]]:
+        """
+        Get top performing videos by growth rate over a period
+
+        Args:
+            channel_id: YouTube channel ID
+            days: Number of days to calculate growth over
+            metric: Metric to rank by ('views', 'likes', 'comments', 'engagement')
+            limit: Number of top videos to return
+
+        Returns:
+            List of (Video, growth_value) tuples, ordered by growth (descending)
+        """
+        since = datetime.utcnow() - timedelta(days=days)
+
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+
+            # Get videos for channel
+            videos = await self.get_channel_videos(channel_id, limit=1000)
+
+            video_growth = []
+            for video in videos:
+                # Get oldest and newest stats in the period
+                async with db.execute("""
+                    SELECT view_count, like_count, comment_count, timestamp
+                    FROM video_stats_history
+                    WHERE video_id = ? AND timestamp >= ?
+                    ORDER BY timestamp ASC
+                """, (video.id, since.isoformat())) as cursor:
+                    stats_list = await cursor.fetchall()
+
+                    if len(stats_list) >= 2:
+                        oldest = stats_list[0]
+                        newest = stats_list[-1]
+
+                        if metric == "views":
+                            growth = newest['view_count'] - oldest['view_count']
+                        elif metric == "likes":
+                            growth = newest['like_count'] - oldest['like_count']
+                        elif metric == "comments":
+                            growth = newest['comment_count'] - oldest['comment_count']
+                        elif metric == "engagement":
+                            # Calculate engagement rate growth
+                            old_engagement = (oldest['like_count'] + oldest['comment_count']) / max(oldest['view_count'], 1)
+                            new_engagement = (newest['like_count'] + newest['comment_count']) / max(newest['view_count'], 1)
+                            growth = (new_engagement - old_engagement) * 100  # Percentage
+                        else:
+                            growth = 0
+
+                        video_growth.append((video, growth))
+
+            # Sort by growth (descending) and return top N
+            video_growth.sort(key=lambda x: x[1], reverse=True)
+            return video_growth[:limit]
+
+    async def get_bottom_videos_by_growth(
+        self,
+        channel_id: str,
+        days: int = 7,
+        metric: str = "views",
+        limit: int = 10
+    ) -> List[tuple[Video, float]]:
+        """
+        Get bottom performing videos by growth rate over a period
+
+        Args:
+            channel_id: YouTube channel ID
+            days: Number of days to calculate growth over
+            metric: Metric to rank by ('views', 'likes', 'comments', 'engagement')
+            limit: Number of bottom videos to return
+
+        Returns:
+            List of (Video, growth_value) tuples, ordered by growth (ascending)
+        """
+        since = datetime.utcnow() - timedelta(days=days)
+
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+
+            # Get videos for channel
+            videos = await self.get_channel_videos(channel_id, limit=1000)
+
+            video_growth = []
+            for video in videos:
+                # Get oldest and newest stats in the period
+                async with db.execute("""
+                    SELECT view_count, like_count, comment_count, timestamp
+                    FROM video_stats_history
+                    WHERE video_id = ? AND timestamp >= ?
+                    ORDER BY timestamp ASC
+                """, (video.id, since.isoformat())) as cursor:
+                    stats_list = await cursor.fetchall()
+
+                    if len(stats_list) >= 2:
+                        oldest = stats_list[0]
+                        newest = stats_list[-1]
+
+                        if metric == "views":
+                            growth = newest['view_count'] - oldest['view_count']
+                        elif metric == "likes":
+                            growth = newest['like_count'] - oldest['like_count']
+                        elif metric == "comments":
+                            growth = newest['comment_count'] - oldest['comment_count']
+                        elif metric == "engagement":
+                            # Calculate engagement rate growth
+                            old_engagement = (oldest['like_count'] + oldest['comment_count']) / max(oldest['view_count'], 1)
+                            new_engagement = (newest['like_count'] + newest['comment_count']) / max(newest['view_count'], 1)
+                            growth = (new_engagement - old_engagement) * 100  # Percentage
+                        else:
+                            growth = 0
+
+                        video_growth.append((video, growth))
+
+            # Sort by growth (ascending) and return bottom N
+            video_growth.sort(key=lambda x: x[1])
+            return video_growth[:limit]

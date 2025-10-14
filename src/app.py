@@ -15,7 +15,7 @@ from .config import Config
 from .youtube_api import YouTubeClient, YouTubeAPIError
 from .database import DatabaseManager
 from .models import Channel, Video, ChangeDetection
-from .widgets import DashboardWidget, ChannelDetailWidget, VideoListWidget
+from .widgets import DashboardWidget, ChannelDetailWidget, VideoListWidget, TopFlopWidget
 
 # Version number for deployment tracking
 VERSION = "2.4.0"
@@ -185,6 +185,10 @@ class SuperTubeApp(App):
         Binding("s", "cycle_sort", "Sort", show=False),
         # Video URL copy
         Binding("y", "copy_video_url", "Copy URL", show=False),
+        # Top/Flop analysis
+        Binding("t", "show_topflop", "Top/Flop", show=False),
+        Binding("p", "cycle_period", "Period", show=False),
+        Binding("m", "cycle_metric", "Metric", show=False),
         # Note: / is handled in on_key() method
     ]
 
@@ -199,6 +203,9 @@ class SuperTubeApp(App):
         self.status_bar: Optional[StatusBar] = None
         self.current_view: str = "dashboard"  # Track current view
         self.selected_channel_id: Optional[str] = None
+        # Top/Flop view state
+        self.topflop_period = 7  # days
+        self.topflop_metric = "views"  # metric
 
     def compose(self) -> ComposeResult:
         """Create child widgets"""
@@ -394,16 +401,24 @@ class SuperTubeApp(App):
 [bold]Dashboard:[/bold]
   ↑/↓ or j/k - Navigate between channels (vim-style)
   s          - Cycle sort order (subscribers → views → videos → name)
+  t          - Show Top/Flop video analysis for selected channel
   ENTER      - View selected channel details
 
 [bold]Channel Details:[/bold]
   ENTER      - View all videos
+  t          - Show Top/Flop video analysis
+  ESC        - Back to Dashboard
+
+[bold]Top/Flop Analysis:[/bold]
+  p          - Cycle period (7d → 30d → 90d)
+  m          - Cycle metric (views → likes → comments → engagement)
   ESC        - Back to Dashboard
 
 [bold]Video List:[/bold]
   ↑/↓ or j/k - Navigate through videos (vim-style)
   /          - Focus search input (filter videos by title)
   s          - Cycle sort order (views → likes → comments → date → engagement)
+  t          - Show Top/Flop video analysis
   y          - Show video URL (displayed in status bar for copying)
   ENTER      - View video details
   ESC        - Back to Dashboard
@@ -476,7 +491,7 @@ class SuperTubeApp(App):
         if self.current_view == "video_detail" and self.selected_channel_id:
             # Go back to video list
             self.show_video_list(self.selected_channel_id)
-        elif self.current_view in ["channel_detail", "video_list"]:
+        elif self.current_view in ["channel_detail", "video_list", "topflop"]:
             self.show_dashboard()
         elif self.current_view == "help":
             self.show_dashboard()
@@ -615,6 +630,49 @@ class SuperTubeApp(App):
                 self.status_bar.set_status("No video selected")
         except Exception as e:
             self.status_bar.set_status(f"Error: {e}")
+
+    def action_show_topflop(self) -> None:
+        """Show Top/Flop analysis view"""
+        if self.current_view == "dashboard":
+            # Get selected channel from dashboard
+            try:
+                container = self.query_one("#main_container", Container)
+                dashboard = container.query_one(DashboardWidget)
+                channel_id = dashboard.get_selected_channel_id()
+                if channel_id:
+                    self.show_topflop_view(channel_id)
+            except:
+                pass
+        elif self.current_view in ["channel_detail", "video_list"]:
+            # Use currently selected channel
+            if self.selected_channel_id:
+                self.show_topflop_view(self.selected_channel_id)
+
+    def action_cycle_period(self) -> None:
+        """Cycle through period options in Top/Flop view"""
+        if self.current_view != "topflop":
+            return
+
+        periods = [7, 30, 90]
+        current_index = periods.index(self.topflop_period) if self.topflop_period in periods else 0
+        self.topflop_period = periods[(current_index + 1) % len(periods)]
+
+        # Reload Top/Flop view with new period
+        if self.selected_channel_id:
+            self.show_topflop_view(self.selected_channel_id)
+
+    def action_cycle_metric(self) -> None:
+        """Cycle through metric options in Top/Flop view"""
+        if self.current_view != "topflop":
+            return
+
+        metrics = ["views", "likes", "comments", "engagement"]
+        current_index = metrics.index(self.topflop_metric) if self.topflop_metric in metrics else 0
+        self.topflop_metric = metrics[(current_index + 1) % len(metrics)]
+
+        # Reload Top/Flop view with new metric
+        if self.selected_channel_id:
+            self.show_topflop_view(self.selected_channel_id)
 
     def on_key(self, event) -> None:
         """Handle key events for special keys like / and y"""
@@ -901,6 +959,63 @@ class SuperTubeApp(App):
                 f"[red]Error rendering graph: {e}[/red]"
             )
 
+    def show_topflop_view(self, channel_id: str) -> None:
+        """Show Top/Flop analysis view for a channel"""
+        self.current_view = "topflop"
+        self.selected_channel_id = channel_id
+        container = self.query_one("#main_container", Container)
+        container.remove_children()
+
+        channel = self.channels_data.get(channel_id)
+        if not channel:
+            container.mount(Label(f"Channel {channel_id} not loaded", classes="error"))
+            return
+
+        # Create and mount topflop widget
+        topflop_widget = TopFlopWidget()
+        container.mount(topflop_widget)
+
+        # Load top/flop data asynchronously
+        self.load_topflop_data(channel_id, topflop_widget)
+
+    @work(exclusive=False)
+    async def load_topflop_data(self, channel_id: str, widget: TopFlopWidget) -> None:
+        """Load top and bottom performing videos"""
+        if not self.db:
+            return
+
+        try:
+            channel = self.channels_data.get(channel_id)
+            if not channel:
+                return
+
+            # Get top and bottom videos
+            top_videos = await self.db.get_top_videos_by_growth(
+                channel_id,
+                days=self.topflop_period,
+                metric=self.topflop_metric,
+                limit=10
+            )
+
+            bottom_videos = await self.db.get_bottom_videos_by_growth(
+                channel_id,
+                days=self.topflop_period,
+                metric=self.topflop_metric,
+                limit=10
+            )
+
+            # Update widget
+            self.call_after_refresh(
+                widget.update_data,
+                channel.name,
+                top_videos,
+                bottom_videos,
+                self.topflop_period,
+                self.topflop_metric
+            )
+        except Exception as e:
+            # Show error
+            pass
 
 
 def main():
