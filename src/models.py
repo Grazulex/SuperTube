@@ -581,3 +581,75 @@ class TitleTagInsights:
     def get_summary(self) -> str:
         """Get human-readable summary"""
         return f"Analyzed {self.analyzed_video_count} videos | {self.title_pattern.get_summary()}"
+
+
+@dataclass
+class GrowthProjection:
+    """Projection of future growth for a channel"""
+    metric: str  # "subscribers" or "views"
+    current_value: int
+    projected_30d: int
+    projected_60d: int
+    projected_90d: int
+    daily_growth_rate: float
+    confidence: float  # 0.0 to 1.0
+
+    @property
+    def growth_30d(self) -> int:
+        """Growth expected in 30 days"""
+        return self.projected_30d - self.current_value
+
+    @property
+    def growth_60d(self) -> int:
+        """Growth expected in 60 days"""
+        return self.projected_60d - self.current_value
+
+    @property
+    def growth_90d(self) -> int:
+        """Growth expected in 90 days"""
+        return self.projected_90d - self.current_value
+
+    def get_confidence_label(self) -> str:
+        """Get human-readable confidence label"""
+        if self.confidence >= 0.8:
+            return "High"
+        elif self.confidence >= 0.5:
+            return "Medium"
+        elif self.confidence >= 0.3:
+            return "Low"
+        else:
+            return "Very Low"
+
+
+@dataclass
+class MilestoneProjection:
+    """Projection of when a milestone will be reached"""
+    metric: str  # "subscribers" or "views"
+    threshold: int
+    current_value: int
+    estimated_date: Optional[datetime]
+    days_until: Optional[int]
+    confidence: float  # 0.0 to 1.0
+    achievable: bool  # False if growth is negative or flat
+
+    def get_confidence_label(self) -> str:
+        """Get human-readable confidence label"""
+        if self.confidence >= 0.8:
+            return "High"
+        elif self.confidence >= 0.5:
+            return "Medium"
+        elif self.confidence >= 0.3:
+            return "Low"
+        else:
+            return "Very Low"
+
+    def get_summary(self) -> str:
+        """Get human-readable summary"""
+        if not self.achievable:
+            return f"{self.threshold:,} {self.metric}: Not achievable (negative/flat growth)"
+        elif self.days_until == 0:
+            return f"{self.threshold:,} {self.metric}: Already reached!"
+        elif self.estimated_date:
+            return f"{self.threshold:,} {self.metric}: {self.estimated_date.strftime('%Y-%m-%d')} ({self.days_until} days)"
+        else:
+            return f"{self.threshold:,} {self.metric}: Unknown"

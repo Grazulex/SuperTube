@@ -1,11 +1,11 @@
 ---
 id: task-24
 title: Analyse de titres et tags performants
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2025-10-13 22:45'
-updated_date: '2025-10-14 21:20'
+updated_date: '2025-10-14 21:33'
 labels: []
 dependencies: []
 priority: medium
@@ -20,9 +20,9 @@ Extraire et analyser les mots-clés et patterns des vidéos les plus performante
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 Extraction des mots-clés des titres performants
-- [ ] #2 Analyse de fréquence des tags sur vidéos à succès
+- [x] #2 Analyse de fréquence des tags sur vidéos à succès
 - [x] #3 Identification des patterns de titres (longueur, style, etc.)
-- [ ] #4 Suggestions de tags basées sur historique
+- [x] #4 Suggestions de tags basées sur historique
 <!-- AC:END -->
 
 ## Implementation Plan

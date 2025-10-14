@@ -18,11 +18,13 @@ from .models import Channel, Video, ChangeDetection, ChannelComparison
 from .widgets import (
     DashboardWidget, ChannelDetailWidget, VideoListWidget, TopFlopWidget,
     ChannelsListPanel, VideosListPanel, VideoDetailsPanel, MainViewPanel,
-    TemporalAnalysisPanel, ChannelComparisonPanel, TitleTagAnalysisPanel
+    TemporalAnalysisPanel, ChannelComparisonPanel, TitleTagAnalysisPanel,
+    GrowthProjectionPanel
 )
 from .alerts import AlertManager
 from .temporal_analysis import TemporalAnalyzer
 from .title_tag_analyzer import TitleTagAnalyzer
+from .growth_predictor import GrowthPredictor
 
 # Version number for deployment tracking
 VERSION = "2.4.0"
@@ -228,6 +230,7 @@ class SuperTubeApp(App):
         Binding("a", "show_temporal", "Temporal"),
         Binding("c", "show_comparison", "Compare"),
         Binding("w", "show_titletag", "Title/Tags"),
+        Binding("g", "show_projection", "Growth"),
         Binding("f", "cycle_filter", "Filter"),
         Binding("escape", "back", "Back"),
         # Vim-style navigation
@@ -877,6 +880,18 @@ class SuperTubeApp(App):
         except Exception as e:
             self.status_bar.set_status(f"Error: {e}")
 
+    def action_show_projection(self) -> None:
+        """Show Growth Projection in main panel"""
+        if self.current_view != "dashboard":
+            return
+
+        try:
+            main_panel = self.query_one("#main_view_panel", MainViewPanel)
+            main_panel.update_mode("projection")
+            self.status_bar.set_status("Showing Growth Projections - Future growth predictions")
+        except Exception as e:
+            self.status_bar.set_status(f"Error: {e}")
+
     def action_cycle_period(self) -> None:
         """Cycle through period options in Top/Flop view"""
         # Check if main panel is in topflop mode
@@ -1385,6 +1400,52 @@ class SuperTubeApp(App):
 
             # Update widget
             self.call_after_refresh(widget.update_insights, insights)
+        except Exception as e:
+            # Silently fail
+            pass
+
+    @work(exclusive=False)
+    async def load_projection_data(self, channel_id: str, widget) -> None:
+        """Load and calculate growth projections for channel"""
+        if not self.db:
+            return
+
+        try:
+            channel = self.channels_data.get(channel_id)
+            if not channel:
+                return
+
+            # Get historical statistics
+            history = await self.db.get_channel_history(channel_id, days=90)
+            if not history or len(history) < 2:
+                # Not enough data - widget will show message
+                self.call_after_refresh(
+                    widget.update_projections,
+                    channel.name,
+                    None,
+                    None,
+                    []
+                )
+                return
+
+            # Create predictor and calculate projections
+            predictor = GrowthPredictor(history)
+
+            # Project subscriber and view growth
+            subscriber_projection = predictor.project_subscribers(days_ahead=90)
+            view_projection = predictor.project_views(days_ahead=90)
+
+            # Get milestone projections (next 3 subscriber milestones)
+            sub_milestones = predictor.get_common_milestones(metric="subscribers")
+
+            # Update widget
+            self.call_after_refresh(
+                widget.update_projections,
+                channel.name,
+                subscriber_projection,
+                view_projection,
+                sub_milestones
+            )
         except Exception as e:
             # Silently fail
             pass

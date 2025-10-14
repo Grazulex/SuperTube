@@ -996,7 +996,7 @@ class MainViewPanel(Static):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.current_mode = "dashboard"  # "dashboard", "topflop", "temporal", "comparison", "titletag"
+        self.current_mode = "dashboard"  # "dashboard", "topflop", "temporal", "comparison", "titletag", "projection"
         self.current_channel: Optional[Channel] = None
         self.channel_history: Optional[List] = None
 
@@ -1013,6 +1013,8 @@ class MainViewPanel(Static):
             yield ChannelComparisonPanel(id="comparison_panel")
             # Title/Tag Analysis panel (visible in titletag mode)
             yield TitleTagAnalysisPanel(id="titletag_panel")
+            # Growth Projection panel (visible in projection mode)
+            yield GrowthProjectionPanel(id="projection_panel")
 
     def on_mount(self) -> None:
         """Initialize widget visibility based on mode"""
@@ -1037,6 +1039,7 @@ class MainViewPanel(Static):
             temporal = self.query_one("#temporal_panel", TemporalAnalysisPanel)
             comparison = self.query_one("#comparison_panel", ChannelComparisonPanel)
             titletag = self.query_one("#titletag_panel", TitleTagAnalysisPanel)
+            projection = self.query_one("#projection_panel", GrowthProjectionPanel)
 
             if self.current_mode == "dashboard":
                 content.display = True
@@ -1044,30 +1047,42 @@ class MainViewPanel(Static):
                 temporal.display = False
                 comparison.display = False
                 titletag.display = False
+                projection.display = False
             elif self.current_mode == "topflop":
                 content.display = False
                 topflop.display = True
                 temporal.display = False
                 comparison.display = False
                 titletag.display = False
+                projection.display = False
             elif self.current_mode == "temporal":
                 content.display = False
                 topflop.display = False
                 temporal.display = True
                 comparison.display = False
                 titletag.display = False
+                projection.display = False
             elif self.current_mode == "comparison":
                 content.display = False
                 topflop.display = False
                 temporal.display = False
                 comparison.display = True
                 titletag.display = False
+                projection.display = False
             elif self.current_mode == "titletag":
                 content.display = False
                 topflop.display = False
                 temporal.display = False
                 comparison.display = False
                 titletag.display = True
+                projection.display = False
+            elif self.current_mode == "projection":
+                content.display = False
+                topflop.display = False
+                temporal.display = False
+                comparison.display = False
+                titletag.display = False
+                projection.display = True
         except:
             pass
 
@@ -1086,6 +1101,8 @@ class MainViewPanel(Static):
             self._show_comparison_view()
         elif self.current_mode == "titletag":
             self._show_titletag_view()
+        elif self.current_mode == "projection":
+            self._show_projection_view()
         else:
             content = self.query_one("#main_view_content", Static)
             content.update(f"[dim]Mode: {self.current_mode}[/dim]")
@@ -1252,6 +1269,22 @@ Change: [{views_color}]{views_sign}{views_change:,}[/{views_color}] ([{views_col
                 # No channel selected - show placeholder
                 titletag.query_one("#titletag_content", Static).update(
                     "[yellow]Select a channel to view title/tag analysis[/yellow]"
+                )
+        except Exception:
+            pass
+
+    def _show_projection_view(self) -> None:
+        """Show Growth Projection panel with data"""
+        try:
+            projection = self.query_one("#projection_panel", GrowthProjectionPanel)
+
+            # Trigger data loading from app if we have a channel selected
+            if self.current_channel and hasattr(self.app, 'load_projection_data'):
+                self.app.load_projection_data(self.current_channel.id, projection)
+            else:
+                # No channel selected - show placeholder
+                projection.query_one("#projection_content", Static).update(
+                    "[yellow]Select a channel to view growth projections[/yellow]"
                 )
         except Exception:
             pass
@@ -1579,4 +1612,106 @@ class TitleTagAnalysisPanel(Static):
             sections.append(f"[bold green]✨ Suggested Keywords:[/bold green]\n{suggested}")
 
         content.update("\n\n".join(sections))
+
+
+class GrowthProjectionPanel(Static):
+    """Panel showing growth projections and milestone predictions"""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.channel_name = ""
+        self.subscriber_projection = None
+        self.view_projection = None
+        self.milestones = []
+
+    def compose(self) -> ComposeResult:
+        """Create child widgets"""
+        with Vertical():
+            yield Label("[bold cyan]📈 Growth Projections[/bold cyan]", classes="panel-title")
+            yield Static(id="projection_content", classes="details-content")
+
+    def update_projections(
+        self,
+        channel_name: str,
+        subscriber_projection,
+        view_projection,
+        milestones: List
+    ) -> None:
+        """Update the projections display"""
+        self.channel_name = channel_name
+        self.subscriber_projection = subscriber_projection
+        self.view_projection = view_projection
+        self.milestones = milestones
+
+        content = self.query_one("#projection_content", Static)
+
+        # Check if we have enough data
+        if not subscriber_projection or subscriber_projection.confidence == 0.0:
+            content.update(
+                f"[bold]{channel_name}[/bold]\n\n"
+                "[yellow]Not enough historical data for projections.[/yellow]\n"
+                "[dim]Refresh daily to build history (minimum 2 data points required).[/dim]"
+            )
+            return
+
+        # Build display sections
+        sections = []
+
+        # Subscribers projection
+        sub_proj = subscriber_projection
+        sub_conf_color = self._get_confidence_color(sub_proj.confidence)
+        sections.append(
+            f"[bold green]📊 Subscribers Projection:[/bold green]\n"
+            f"Current: [green]{sub_proj.current_value:,}[/green]\n"
+            f"30 days:  [green]{sub_proj.projected_30d:,}[/green] ([cyan]+{sub_proj.growth_30d:,}[/cyan])\n"
+            f"60 days:  [green]{sub_proj.projected_60d:,}[/green] ([cyan]+{sub_proj.growth_60d:,}[/cyan])\n"
+            f"90 days:  [green]{sub_proj.projected_90d:,}[/green] ([cyan]+{sub_proj.growth_90d:,}[/cyan])\n"
+            f"Daily rate: [yellow]{sub_proj.daily_growth_rate:+.1f}[/yellow] subs/day\n"
+            f"Confidence: [{sub_conf_color}]{sub_proj.get_confidence_label()}[/{sub_conf_color}] "
+            f"[dim]({sub_proj.confidence:.1%})[/dim]"
+        )
+
+        # Views projection
+        view_proj = view_projection
+        view_conf_color = self._get_confidence_color(view_proj.confidence)
+        sections.append(
+            f"[bold yellow]📺 Views Projection:[/bold yellow]\n"
+            f"Current: [yellow]{view_proj.current_value:,}[/yellow]\n"
+            f"30 days:  [yellow]{view_proj.projected_30d:,}[/yellow] ([cyan]+{view_proj.growth_30d:,}[/cyan])\n"
+            f"60 days:  [yellow]{view_proj.projected_60d:,}[/yellow] ([cyan]+{view_proj.growth_60d:,}[/cyan])\n"
+            f"90 days:  [yellow]{view_proj.projected_90d:,}[/yellow] ([cyan]+{view_proj.growth_90d:,}[/cyan])\n"
+            f"Daily rate: [yellow]{view_proj.daily_growth_rate:+,.0f}[/yellow] views/day\n"
+            f"Confidence: [{view_conf_color}]{view_proj.get_confidence_label()}[/{view_conf_color}] "
+            f"[dim]({view_proj.confidence:.1%})[/dim]"
+        )
+
+        # Milestones (next 3 achievable)
+        achievable_milestones = [m for m in milestones if m.achievable and m.days_until and m.days_until > 0]
+        if achievable_milestones:
+            milestone_lines = ["[bold magenta]🎯 Next Milestones:[/bold magenta]"]
+            for i, milestone in enumerate(achievable_milestones[:3], 1):
+                conf_color = self._get_confidence_color(milestone.confidence)
+                if milestone.estimated_date:
+                    date_str = milestone.estimated_date.strftime("%Y-%m-%d")
+                    days_str = f"{milestone.days_until} days"
+                    milestone_lines.append(
+                        f"{i}. [{conf_color}]{milestone.threshold:,}[/{conf_color}] {milestone.metric}: "
+                        f"[cyan]{date_str}[/cyan] ([dim]{days_str}[/dim])"
+                    )
+            sections.append("\n".join(milestone_lines))
+        else:
+            sections.append("[dim]🎯 Milestones: No upcoming milestones (negative/flat growth)[/dim]")
+
+        content.update("\n\n".join(sections))
+
+    def _get_confidence_color(self, confidence: float) -> str:
+        """Get color for confidence level"""
+        if confidence >= 0.8:
+            return "green"
+        elif confidence >= 0.5:
+            return "yellow"
+        elif confidence >= 0.3:
+            return "white"
+        else:
+            return "red"
 
