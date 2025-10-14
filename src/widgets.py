@@ -704,9 +704,17 @@ class ChannelsListPanel(Static):
         table.clear(columns=False)
 
         for channel in channels:
+            # Format subscriber count properly
+            if channel.subscriber_count >= 1000000:
+                subs_display = f"{channel.subscriber_count / 1000000:.1f}M"
+            elif channel.subscriber_count >= 1000:
+                subs_display = f"{channel.subscriber_count / 1000:.1f}K"
+            else:
+                subs_display = str(channel.subscriber_count)
+
             table.add_row(
                 channel.name[:18] + ".." if len(channel.name) > 20 else channel.name,
-                f"[green]{channel.subscriber_count // 1000}K[/green]",
+                f"[green]{subs_display}[/green]",
                 key=channel.id
             )
 
@@ -761,9 +769,17 @@ class VideosListPanel(Static):
             # Truncate title
             display_title = title[:23] + ".." if len(title) > 25 else title
 
+            # Format view count properly
+            if video.view_count >= 1000000:
+                views_display = f"{video.view_count / 1000000:.1f}M"
+            elif video.view_count >= 1000:
+                views_display = f"{video.view_count / 1000:.1f}K"
+            else:
+                views_display = str(video.view_count)
+
             table.add_row(
                 display_title,
-                f"[yellow]{video.view_count // 1000}K[/yellow]",
+                f"[yellow]{views_display}[/yellow]",
                 key=video.id
             )
 

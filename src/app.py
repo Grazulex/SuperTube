@@ -541,22 +541,22 @@ class SuperTubeApp(App):
             return
 
         try:
-            # Get the 3 focusable panels in order
-            channels_panel = self.query_one("#channels_panel", ChannelsListPanel)
-            videos_panel = self.query_one("#videos_panel", VideosListPanel)
+            from textual.widgets import DataTable
 
-            # Find which panel has focus
-            if channels_panel.has_focus or channels_panel.query_one("#channels_panel_table").has_focus:
-                # Move to videos panel
-                videos_table = videos_panel.query_one("#videos_panel_table")
+            # Get focused widget
+            focused = self.focused
+
+            # Find which table is focused
+            channels_table = self.query_one("#channels_panel_table", DataTable)
+            videos_table = self.query_one("#videos_panel_table", DataTable)
+
+            # Cycle: Channels → Videos → Channels
+            if focused == channels_table:
                 videos_table.focus()
-            elif videos_panel.has_focus or videos_panel.query_one("#videos_panel_table").has_focus:
-                # Move back to channels panel (cycle)
-                channels_table = channels_panel.query_one("#channels_panel_table")
+            elif focused == videos_table:
                 channels_table.focus()
             else:
-                # Default: focus channels panel
-                channels_table = channels_panel.query_one("#channels_panel_table")
+                # Default: focus channels
                 channels_table.focus()
 
         except Exception as e:
