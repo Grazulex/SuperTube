@@ -429,8 +429,26 @@ class SuperTubeApp(App):
             # Store current channel
             self.selected_channel_id = channel_id
 
+            # Load channel history asynchronously for graphs
+            self.load_channel_stats_for_panel(channel_id, main_panel)
+
         except Exception as e:
             self.status_bar.set_status(f"Error loading channel: {e}")
+
+    @work(exclusive=False)
+    async def load_channel_stats_for_panel(self, channel_id: str, panel: MainViewPanel) -> None:
+        """Load historical statistics for channel and update main panel with graphs"""
+        if not self.db:
+            return
+
+        try:
+            history = await self.db.get_channel_history(channel_id, days=30)
+            channel = self.channels_data.get(channel_id)
+            if channel:
+                panel.update_channel_context(channel, history)
+        except Exception as e:
+            # Silently fail if history loading fails
+            pass
 
     def _on_video_selected(self, video_id: str, video: Video) -> None:
         """Callback when a video is selected"""

@@ -789,8 +789,9 @@ class VideosListPanel(Static):
     def on_mount(self) -> None:
         """Initialize the table"""
         table = self.query_one("#videos_panel_table", DataTable)
-        table.add_column("Title", key="title", width=25)
-        table.add_column("Views", key="views", width=8)
+        table.add_column("Title", key="title", width=18)
+        table.add_column("Views", key="views", width=7)
+        table.add_column("Likes", key="likes", width=6)
 
     def update_videos(self, videos: List[Video]) -> None:
         """Update the videos list"""
@@ -824,8 +825,8 @@ class VideosListPanel(Static):
                 badge = "🆕"
                 title = f"{badge} {title}"
 
-            # Truncate title
-            display_title = title[:23] + ".." if len(title) > 25 else title
+            # Truncate title (shorter to accommodate Likes column)
+            display_title = title[:15] + ".." if len(title) > 17 else title
 
             # Format view count properly
             if video.view_count >= 1000000:
@@ -835,9 +836,18 @@ class VideosListPanel(Static):
             else:
                 views_display = str(video.view_count)
 
+            # Format like count properly
+            if video.like_count >= 1000000:
+                likes_display = f"{video.like_count / 1000000:.1f}M"
+            elif video.like_count >= 1000:
+                likes_display = f"{video.like_count / 1000:.1f}K"
+            else:
+                likes_display = str(video.like_count)
+
             table.add_row(
                 display_title,
                 f"[yellow]{views_display}[/yellow]",
+                f"[green]{likes_display}[/green]",
                 key=video.id
             )
 
@@ -884,7 +894,7 @@ class VideoDetailsPanel(Static):
             yield Static(id="video_details_content", classes="details-content")
 
     def update_video_details(self, video: Optional[Video]) -> None:
-        """Update the video details display"""
+        """Update the video details display - ALL stats"""
         self.current_video = video
         content = self.query_one("#video_details_content", Static)
 
@@ -892,23 +902,28 @@ class VideoDetailsPanel(Static):
             content.update("[dim]No video selected[/dim]")
             return
 
-        # Calculate engagement
+        # Calculate engagement metrics
         engagement_rate = (video.like_count / max(video.view_count, 1)) * 100
+        comments_per_1k = (video.comment_count / max(video.view_count, 1)) * 1000
 
-        details = f"""[bold]{video.title[:30]}...[/bold]
+        # Format counts
+        views_fmt = f"{video.view_count:,}"
+        likes_fmt = f"{video.like_count:,}"
+        comments_fmt = f"{video.comment_count:,}"
 
-[dim]Published:[/dim]
-{video.published_at.strftime('%Y-%m-%d')}
+        details = f"""[bold]{video.title[:28]}...[/bold]
 
-[dim]Duration:[/dim]
-{video.formatted_duration}
+[dim]Published:[/dim] {video.published_at.strftime('%Y-%m-%d')}
+[dim]Duration:[/dim] {video.formatted_duration}
 
-[yellow]Views:[/yellow] {video.view_count:,}
-[green]Likes:[/green] {video.like_count:,}
-[blue]Comments:[/blue] {video.comment_count:,}
+[bold yellow]Stats:[/bold yellow]
+Views: {views_fmt}
+Likes: {likes_fmt}
+Cmnts: {comments_fmt}
 
-[magenta]Engagement:[/magenta]
-{engagement_rate:.2f}%
+[bold magenta]Engagement:[/bold magenta]
+Like Rate: {engagement_rate:.2f}%
+Cmnt/1k: {comments_per_1k:.1f}
 """
         content.update(details)
 
@@ -920,6 +935,7 @@ class MainViewPanel(Static):
         super().__init__(**kwargs)
         self.current_mode = "dashboard"  # "dashboard", "topflop", etc.
         self.current_channel: Optional[Channel] = None
+        self.channel_history: Optional[List] = None
 
     def compose(self) -> ComposeResult:
         """Create child widgets"""
@@ -931,9 +947,10 @@ class MainViewPanel(Static):
         self.current_mode = mode
         self.refresh_view()
 
-    def update_channel_context(self, channel: Optional[Channel]) -> None:
+    def update_channel_context(self, channel: Optional[Channel], history: Optional[List] = None) -> None:
         """Update which channel is selected"""
         self.current_channel = channel
+        self.channel_history = history
         self.refresh_view()
 
     def refresh_view(self) -> None:
@@ -948,7 +965,7 @@ class MainViewPanel(Static):
             content.update(f"[dim]Mode: {self.current_mode}[/dim]")
 
     def _show_dashboard_view(self, content: Static) -> None:
-        """Show dashboard stats for selected channel"""
+        """Show dashboard stats and graphs for selected channel"""
         if not self.current_channel:
             content.update("[dim]Select a channel to view stats[/dim]")
             return
@@ -956,24 +973,65 @@ class MainViewPanel(Static):
         ch = self.current_channel
         avg_views = ch.view_count // max(ch.video_count, 1)
 
-        dashboard = f"""[bold cyan]📊 Channel Statistics[/bold cyan]
+        # Build stats section
+        stats_section = f"""[bold cyan]📊 {ch.name}[/bold cyan]
 
-[bold]{ch.name}[/bold]
-
-[bold yellow]Overview:[/bold yellow]
-  Subscribers:  [green]{ch.subscriber_count:,}[/green]
-  Total Views:  [yellow]{ch.view_count:,}[/yellow]
-  Videos:       [blue]{ch.video_count:,}[/blue]
-
-[bold magenta]Performance:[/bold magenta]
-  Avg Views/Video:  [yellow]{avg_views:,}[/yellow]
-
-[bold cyan]Description:[/bold cyan]
-{ch.description[:300]}{'...' if len(ch.description) > 300 else ''}
-
-[dim]Press 't' for Top/Flop analysis[/dim]
+[bold yellow]Stats:[/bold yellow]
+Subscribers:  [green]{ch.subscriber_count:,}[/green]
+Total Views:  [yellow]{ch.view_count:,}[/yellow]
+Videos:       [blue]{ch.video_count:,}[/blue]
+Avg Views/Vid: [yellow]{avg_views:,}[/yellow]
 """
+
+        # Add graphs if we have history
+        if self.channel_history and len(self.channel_history) >= 2:
+            graphs = self._generate_channel_graphs()
+            dashboard = f"{stats_section}\n{graphs}\n\n[dim]Press 't' for Top/Flop[/dim]"
+        else:
+            dashboard = f"{stats_section}\n[dim yellow]📈 Graphs:[/dim yellow]\n[dim]Not enough history yet. Refresh daily to build trend graphs.[/dim]\n\n[dim]Press 't' for Top/Flop[/dim]"
+
         content.update(dashboard)
+
+    def _generate_channel_graphs(self) -> str:
+        """Generate ASCII graphs for channel trends"""
+        try:
+            import plotext as plt
+            from io import StringIO
+
+            if not self.channel_history or len(self.channel_history) < 2:
+                return "[dim]Not enough data for graphs[/dim]"
+
+            # Extract data
+            dates = [stat.timestamp.strftime("%m-%d") for stat in self.channel_history]
+            subscribers = [stat.subscriber_count for stat in self.channel_history]
+            views = [stat.view_count for stat in self.channel_history]
+
+            # Subscribers graph
+            plt.clf()
+            plt.title("Subscribers Trend (30d)")
+            plt.plot(dates, subscribers, marker="braille", color="green")
+            plt.theme("dark")
+            plt.plotsize(70, 10)
+
+            buffer = StringIO()
+            plt.show(buffer)
+            subs_graph = buffer.getvalue()
+
+            # Views graph
+            plt.clf()
+            plt.title("Total Views Trend (30d)")
+            plt.plot(dates, views, marker="braille", color="yellow")
+            plt.theme("dark")
+            plt.plotsize(70, 10)
+
+            buffer = StringIO()
+            plt.show(buffer)
+            views_graph = buffer.getvalue()
+
+            return f"[dim yellow]📈 Trends ({len(self.channel_history)} pts):[/dim yellow]\n\n{subs_graph}\n{views_graph}"
+
+        except Exception as e:
+            return f"[dim red]Error generating graphs: {e}[/dim red]"
 
     def _show_topflop_view(self, content: Static) -> None:
         """Show Top/Flop placeholder"""
