@@ -218,7 +218,7 @@ class DatabaseManager:
 
     async def has_stats_for_today(self, channel_id: str) -> bool:
         """
-        Check if we already have stats for today for a given channel
+        Check if we already have stats for today for a given channel (based on local calendar day)
 
         Args:
             channel_id: YouTube channel ID
@@ -226,15 +226,26 @@ class DatabaseManager:
         Returns:
             True if stats exist for today, False otherwise
         """
-        today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-        today_end = today_start + timedelta(days=1)
+        # Get today's start/end in local time
+        local_today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        local_today_end = local_today_start + timedelta(days=1)
+
+        # Convert to UTC for comparison with DB timestamps (which are in UTC)
+        # Calculate UTC offset
+        utc_now = datetime.utcnow()
+        local_now = datetime.now()
+        utc_offset = local_now - utc_now
+
+        # Convert local times to UTC
+        utc_today_start = local_today_start - utc_offset
+        utc_today_end = local_today_end - utc_offset
 
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute("""
                 SELECT COUNT(*) as count FROM stats_history
                 WHERE channel_id = ? AND timestamp >= ? AND timestamp < ?
-            """, (channel_id, today_start.isoformat(), today_end.isoformat())) as cursor:
+            """, (channel_id, utc_today_start.isoformat(), utc_today_end.isoformat())) as cursor:
                 row = await cursor.fetchone()
                 return row['count'] > 0 if row else False
 

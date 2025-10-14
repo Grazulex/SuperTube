@@ -9,7 +9,9 @@ services:
     tty: true         # Enable TTY for Textual
     environment:
       - TERM=xterm-256color
+      - TZ=Europe/Brussels  # Set timezone to match host
     volumes:
       - ./config:/app/config     # Mount config directory (needs write access for token.pickle)
       - ./data:/app/data         # Mount data directory for SQLite cache
+      - /etc/localtime:/etc/localtime:ro  # Mount host timezone
     restart: "no"  # Don't auto-restart (it's an interactive app)
