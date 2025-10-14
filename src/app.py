@@ -14,11 +14,14 @@ from textual import work
 from .config import Config
 from .youtube_api import YouTubeClient, YouTubeAPIError
 from .database import DatabaseManager
-from .models import Channel, Video, ChangeDetection
+from .models import Channel, Video, ChangeDetection, ChannelComparison
 from .widgets import (
     DashboardWidget, ChannelDetailWidget, VideoListWidget, TopFlopWidget,
-    ChannelsListPanel, VideosListPanel, VideoDetailsPanel, MainViewPanel
+    ChannelsListPanel, VideosListPanel, VideoDetailsPanel, MainViewPanel,
+    TemporalAnalysisPanel, ChannelComparisonPanel
 )
+from .alerts import AlertManager
+from .temporal_analysis import TemporalAnalyzer
 
 # Version number for deployment tracking
 VERSION = "2.4.0"
@@ -221,6 +224,9 @@ class SuperTubeApp(App):
         Binding("d", "dashboard", "Dashboard"),
         Binding("s", "cycle_sort", "Sort"),
         Binding("t", "show_topflop", "Top/Flop"),
+        Binding("a", "show_temporal", "Temporal"),
+        Binding("c", "show_comparison", "Compare"),
+        Binding("f", "cycle_filter", "Filter"),
         Binding("escape", "back", "Back"),
         # Vim-style navigation
         Binding("j", "cursor_down", "Down", show=False),
@@ -247,6 +253,9 @@ class SuperTubeApp(App):
         # Top/Flop view state
         self.topflop_period = 7  # days
         self.topflop_metric = "views"  # metric
+        # Alert system
+        self.alert_manager: Optional[AlertManager] = None
+        self.active_alerts: List = []
 
     def compose(self) -> ComposeResult:
         """Create child widgets - Lazydocker-style layout"""
@@ -312,6 +321,10 @@ class SuperTubeApp(App):
             self.show_error(f"YouTube authentication failed: {e}\n\nTry running: docker compose run --rm supertube python -m src.authenticate")
             return
 
+        # Initialize alert system with default thresholds
+        self.alert_manager = AlertManager(AlertManager.get_default_thresholds())
+        self.status_bar.set_status("Alert system initialized")
+
         # Load initial data
         self.load_data()
 
@@ -355,6 +368,21 @@ class SuperTubeApp(App):
                     changes = await self.db.detect_changes(channel_config.channel_id, channel, videos)
                     self.changes_data[channel.id] = changes
 
+                    # Check alert thresholds
+                    if self.alert_manager:
+                        # Check channel alerts
+                        channel_alerts = self.alert_manager.check_channel_alerts(channel)
+                        for alert in channel_alerts:
+                            await self.db.save_alert(alert)
+                            self.active_alerts.append(alert)
+
+                        # Check video alerts
+                        for video in videos:
+                            video_alerts = self.alert_manager.check_video_alerts(video, channel.name)
+                            for alert in video_alerts:
+                                await self.db.save_alert(alert)
+                                self.active_alerts.append(alert)
+
                     # Save to cache and record today's stats
                     await self.db.save_channel(channel)
                     await self.db.save_videos(videos)
@@ -371,6 +399,11 @@ class SuperTubeApp(App):
 
         self.status_bar.set_status("Data loaded successfully")
         self.status_bar.set_last_update(datetime.now())
+
+        # Display alert summary if any
+        if self.active_alerts:
+            alert_count = len(self.active_alerts)
+            self.status_bar.set_status(f"Data loaded - {alert_count} alert(s) triggered!")
 
         # Show dashboard
         self.show_dashboard()
@@ -497,7 +530,7 @@ class SuperTubeApp(App):
     def action_help(self) -> None:
         """Show help screen"""
         self.current_view = "help"
-        container = self.query_one("#main_container", Container)
+        container = self.query_one("#main_container", Horizontal)
         container.remove_children()
 
         help_text = """[bold cyan]📖 SuperTube - Keyboard Shortcuts[/bold cyan]
@@ -509,9 +542,9 @@ class SuperTubeApp(App):
   ?          - Show this help
   ESC        - Back to previous screen
 
-[bold]New Panel Layout:[/bold]
+[bold]Panel Layout:[/bold]
   Left panels show: Channels → Videos → Video Details
-  Right panel shows: Channel stats, Top/Flop analysis, etc.
+  Right panel shows: Channel stats, Top/Flop analysis, Temporal analysis
 
   Navigation is automatic - just use ↑↓ to select!
   Selected channel → loads videos automatically
@@ -520,14 +553,23 @@ class SuperTubeApp(App):
 [bold]Panel Commands:[/bold]
   ↑/↓ or j/k - Navigate in current panel (auto-selects)
   Tab        - Switch between Channels and Videos panels
+  s          - Cycle sort order in focused panel
+  d          - Show Dashboard view in main panel
   t          - Show Top/Flop analysis in main view
-  d          - Return to Dashboard view in main panel
+  a          - Show Temporal Analysis in main view
+  f          - Cycle video filters (all → recent → popular → viral → high engagement)
   y          - Show video URL (when video selected)
 
 [bold]Top/Flop Analysis:[/bold]
   p          - Cycle period (7d → 30d → 90d)
   m          - Cycle metric (views → likes → comments → engagement)
-  d          - Back to Dashboard view
+
+[bold]Video Filters (press 'f'):[/bold]
+  None              - Show all videos
+  Recent (7 days)   - Videos from last week
+  Popular (>10K)    - Videos with >10K views
+  Viral (>100K)     - Videos with >100K views
+  High Engagement   - Videos with >5% engagement
 
 [bold]Status Bar:[/bold]
   Shows last update time, current status, and notifications
@@ -537,7 +579,7 @@ class SuperTubeApp(App):
   • Just navigate with arrows - selection is automatic
   • Use Tab to switch between panels
   • Stats are collected automatically once per day
-  • Green notifications show new videos and stat changes
+  • Press 'f' to filter videos by recency or popularity
 
 [dim]Press ESC or 'd' to return to dashboard...[/dim]
         """
@@ -720,6 +762,36 @@ class SuperTubeApp(App):
         except Exception as e:
             self.status_bar.set_status(f"Sort error: {e}")
 
+    def action_cycle_filter(self) -> None:
+        """Cycle through video filter presets"""
+        if self.current_view != "dashboard":
+            return
+
+        try:
+            # Get videos panel
+            videos_panel = self.query_one("#videos_panel", VideosListPanel)
+
+            # Cycle through filter presets
+            # Track current filter state
+            if not hasattr(self, '_current_filter_preset'):
+                self._current_filter_preset = "none"
+
+            # Define filter cycle: none → recent → popular → viral → high_engagement → none
+            filter_cycle = ["none", "recent", "popular", "viral", "high_engagement"]
+            current_index = filter_cycle.index(self._current_filter_preset) if self._current_filter_preset in filter_cycle else 0
+            next_index = (current_index + 1) % len(filter_cycle)
+            next_preset = filter_cycle[next_index]
+
+            # Apply filter
+            filter_desc = videos_panel.set_filter_preset(next_preset)
+            self._current_filter_preset = next_preset
+
+            # Update status bar
+            self.status_bar.set_status(f"Filter: {filter_desc}")
+
+        except Exception as e:
+            self.status_bar.set_status(f"Filter error: {e}")
+
     def action_focus_search(self) -> None:
         """Focus the search input in video list"""
         if self.current_view != "video_list":
@@ -767,9 +839,38 @@ class SuperTubeApp(App):
         except Exception as e:
             self.status_bar.set_status(f"Error: {e}")
 
+    def action_show_temporal(self) -> None:
+        """Show Temporal Analysis in main panel"""
+        if self.current_view != "dashboard":
+            return
+
+        try:
+            main_panel = self.query_one("#main_view_panel", MainViewPanel)
+            main_panel.update_mode("temporal")
+            self.status_bar.set_status("Showing Temporal Analysis - Best publication times")
+        except Exception as e:
+            self.status_bar.set_status(f"Error: {e}")
+
+    def action_show_comparison(self) -> None:
+        """Show Channel Comparison in main panel"""
+        if self.current_view != "dashboard":
+            return
+
+        try:
+            main_panel = self.query_one("#main_view_panel", MainViewPanel)
+            main_panel.update_mode("comparison")
+            self.status_bar.set_status("Showing Channel Comparison - Press 'm' to cycle sort metric")
+        except Exception as e:
+            self.status_bar.set_status(f"Error: {e}")
+
     def action_cycle_period(self) -> None:
         """Cycle through period options in Top/Flop view"""
-        if self.current_view != "topflop":
+        # Check if main panel is in topflop mode
+        try:
+            main_panel = self.query_one("#main_view_panel", MainViewPanel)
+            if main_panel.current_mode != "topflop":
+                return
+        except:
             return
 
         periods = [7, 30, 90]
@@ -777,21 +878,33 @@ class SuperTubeApp(App):
         self.topflop_period = periods[(current_index + 1) % len(periods)]
 
         # Reload Top/Flop view with new period
-        if self.selected_channel_id:
-            self.show_topflop_view(self.selected_channel_id)
+        main_panel.refresh_view()
+        period_labels = {7: "7 days", 30: "30 days", 90: "90 days"}
+        self.status_bar.set_status(f"Period: {period_labels.get(self.topflop_period, f'{self.topflop_period}d')}")
 
     def action_cycle_metric(self) -> None:
-        """Cycle through metric options in Top/Flop view"""
-        if self.current_view != "topflop":
+        """Cycle through metric options in Top/Flop view or Comparison view"""
+        try:
+            main_panel = self.query_one("#main_view_panel", MainViewPanel)
+
+            if main_panel.current_mode == "topflop":
+                # Cycle Top/Flop metrics
+                metrics = ["views", "likes", "comments", "engagement"]
+                current_index = metrics.index(self.topflop_metric) if self.topflop_metric in metrics else 0
+                self.topflop_metric = metrics[(current_index + 1) % len(metrics)]
+
+                # Reload Top/Flop view with new metric
+                main_panel.refresh_view()
+                metric_labels = {"views": "Views", "likes": "Likes", "comments": "Comments", "engagement": "Engagement"}
+                self.status_bar.set_status(f"Metric: {metric_labels.get(self.topflop_metric, self.topflop_metric)}")
+
+            elif main_panel.current_mode == "comparison":
+                # Cycle Comparison metrics
+                comparison_panel = self.query_one("#comparison_panel", ChannelComparisonPanel)
+                metric_desc = comparison_panel.cycle_sort_metric()
+                self.status_bar.set_status(f"Comparison: {metric_desc}")
+        except:
             return
-
-        metrics = ["views", "likes", "comments", "engagement"]
-        current_index = metrics.index(self.topflop_metric) if self.topflop_metric in metrics else 0
-        self.topflop_metric = metrics[(current_index + 1) % len(metrics)]
-
-        # Reload Top/Flop view with new metric
-        if self.selected_channel_id:
-            self.show_topflop_view(self.selected_channel_id)
 
     def on_key(self, event) -> None:
         """Handle key events for special keys like Tab, /, and y"""
@@ -1142,6 +1255,101 @@ class SuperTubeApp(App):
             )
         except Exception as e:
             # Show error
+            pass
+
+    @work(exclusive=False)
+    async def load_temporal_data(self, channel_id: str, widget) -> None:
+        """Load and analyze temporal patterns for channel videos"""
+        try:
+            channel = self.channels_data.get(channel_id)
+            if not channel:
+                return
+
+            # Get all videos for this channel
+            videos = self.videos_data.get(channel_id, [])
+            if not videos:
+                return
+
+            # Run temporal analysis
+            analyzer = TemporalAnalyzer(videos)
+            day_patterns = analyzer.analyze_day_of_week()
+            hour_patterns = analyzer.analyze_hour_of_day()
+            month_patterns = analyzer.analyze_seasonal_patterns()
+            recommendations = analyzer.generate_recommendations()
+
+            # Update widget
+            self.call_after_refresh(
+                widget.update_patterns,
+                channel.name,
+                day_patterns,
+                hour_patterns,
+                month_patterns,
+                recommendations
+            )
+        except Exception as e:
+            # Silently fail
+            pass
+
+    @work(exclusive=False)
+    async def load_comparison_data(self, widget) -> None:
+        """Load and calculate comparison metrics for all channels"""
+        if not self.db:
+            return
+
+        try:
+            comparisons = []
+
+            for channel_id, channel in self.channels_data.items():
+                # Get videos for this channel
+                videos = self.videos_data.get(channel_id, [])
+
+                # Calculate average views per video
+                avg_views = channel.view_count / max(channel.video_count, 1)
+
+                # Calculate average engagement rate from videos
+                if videos:
+                    total_engagement = sum(v.engagement_rate for v in videos)
+                    avg_engagement = total_engagement / len(videos)
+                else:
+                    avg_engagement = 0.0
+
+                # Get historical data for growth calculation
+                history = await self.db.get_channel_history(channel_id, days=30)
+                if history and len(history) >= 2:
+                    oldest = history[0]
+                    newest = history[-1]
+
+                    sub_growth = newest.subscriber_count - oldest.subscriber_count
+                    sub_growth_pct = (sub_growth / max(oldest.subscriber_count, 1)) * 100
+
+                    view_growth = newest.view_count - oldest.view_count
+                    view_growth_pct = (view_growth / max(oldest.view_count, 1)) * 100
+                else:
+                    sub_growth = 0
+                    sub_growth_pct = 0.0
+                    view_growth = 0
+                    view_growth_pct = 0.0
+
+                # Create comparison object
+                comp = ChannelComparison(
+                    channel_id=channel.id,
+                    channel_name=channel.name,
+                    subscriber_count=channel.subscriber_count,
+                    video_count=channel.video_count,
+                    total_views=channel.view_count,
+                    avg_views_per_video=avg_views,
+                    avg_engagement_rate=avg_engagement,
+                    subscriber_growth=sub_growth,
+                    subscriber_growth_percent=sub_growth_pct,
+                    view_growth=view_growth,
+                    view_growth_percent=view_growth_pct
+                )
+                comparisons.append(comp)
+
+            # Update widget
+            self.call_after_refresh(widget.update_comparisons, comparisons)
+        except Exception as e:
+            # Silently fail
             pass
 
 

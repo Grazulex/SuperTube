@@ -250,3 +250,290 @@ class ChangeDetection:
                 parts.append(", ".join(channel_parts))
 
         return " | ".join(parts) if parts else "No changes"
+
+
+@dataclass
+class AlertThreshold:
+    """Configuration for an alert threshold"""
+    metric: str  # e.g., "subscribers", "views", "engagement_rate"
+    operator: str  # e.g., ">=", "<=", ">", "<", "=="
+    value: float  # threshold value
+    alert_type: str  # "success", "warning", "danger"
+    message: str  # custom message template
+    enabled: bool = True
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for serialization"""
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'AlertThreshold':
+        """Create from dictionary"""
+        return cls(**data)
+
+
+@dataclass
+class Alert:
+    """An alert that was triggered"""
+    id: Optional[int] = None
+    channel_id: Optional[str] = None
+    video_id: Optional[str] = None
+    metric: str = ""
+    threshold_value: float = 0.0
+    actual_value: float = 0.0
+    alert_type: str = "success"  # "success", "warning", "danger"
+    message: str = ""
+    triggered_at: Optional[datetime] = None
+    acknowledged: bool = False
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for serialization"""
+        data = asdict(self)
+        if self.triggered_at:
+            data['triggered_at'] = self.triggered_at.isoformat()
+        return data
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'Alert':
+        """Create from dictionary"""
+        if isinstance(data.get('triggered_at'), str):
+            data['triggered_at'] = datetime.fromisoformat(data['triggered_at'])
+        return cls(**data)
+
+
+@dataclass
+class VideoFilter:
+    """Filter criteria for video lists"""
+    # Date range filter
+    date_from: Optional[datetime] = None
+    date_to: Optional[datetime] = None
+
+    # Views range filter
+    views_min: Optional[int] = None
+    views_max: Optional[int] = None
+
+    # Likes range filter
+    likes_min: Optional[int] = None
+    likes_max: Optional[int] = None
+
+    # Comments range filter
+    comments_min: Optional[int] = None
+    comments_max: Optional[int] = None
+
+    # Engagement rate filter
+    engagement_min: Optional[float] = None
+    engagement_max: Optional[float] = None
+
+    # Text search
+    search_text: Optional[str] = None
+
+    def is_active(self) -> bool:
+        """Check if any filter is active"""
+        return any([
+            self.date_from is not None,
+            self.date_to is not None,
+            self.views_min is not None,
+            self.views_max is not None,
+            self.likes_min is not None,
+            self.likes_max is not None,
+            self.comments_min is not None,
+            self.comments_max is not None,
+            self.engagement_min is not None,
+            self.engagement_max is not None,
+            self.search_text is not None and self.search_text != ""
+        ])
+
+    def matches(self, video: Video) -> bool:
+        """Check if video matches all filter criteria"""
+        # Date range
+        if self.date_from and video.published_at < self.date_from:
+            return False
+        if self.date_to and video.published_at > self.date_to:
+            return False
+
+        # Views range
+        if self.views_min is not None and video.view_count < self.views_min:
+            return False
+        if self.views_max is not None and video.view_count > self.views_max:
+            return False
+
+        # Likes range
+        if self.likes_min is not None and video.like_count < self.likes_min:
+            return False
+        if self.likes_max is not None and video.like_count > self.likes_max:
+            return False
+
+        # Comments range
+        if self.comments_min is not None and video.comment_count < self.comments_min:
+            return False
+        if self.comments_max is not None and video.comment_count > self.comments_max:
+            return False
+
+        # Engagement rate
+        if self.engagement_min is not None and video.engagement_rate < self.engagement_min:
+            return False
+        if self.engagement_max is not None and video.engagement_rate > self.engagement_max:
+            return False
+
+        # Text search
+        if self.search_text and self.search_text.lower() not in video.title.lower():
+            return False
+
+        return True
+
+    def get_summary(self) -> str:
+        """Get human-readable summary of active filters"""
+        parts = []
+
+        if self.date_from or self.date_to:
+            if self.date_from and self.date_to:
+                parts.append(f"Date: {self.date_from.strftime('%Y-%m-%d')} to {self.date_to.strftime('%Y-%m-%d')}")
+            elif self.date_from:
+                parts.append(f"Date: from {self.date_from.strftime('%Y-%m-%d')}")
+            else:
+                parts.append(f"Date: until {self.date_to.strftime('%Y-%m-%d')}")
+
+        if self.views_min or self.views_max:
+            if self.views_min and self.views_max:
+                parts.append(f"Views: {self.views_min:,}-{self.views_max:,}")
+            elif self.views_min:
+                parts.append(f"Views: ≥{self.views_min:,}")
+            else:
+                parts.append(f"Views: ≤{self.views_max:,}")
+
+        if self.likes_min or self.likes_max:
+            if self.likes_min and self.likes_max:
+                parts.append(f"Likes: {self.likes_min:,}-{self.likes_max:,}")
+            elif self.likes_min:
+                parts.append(f"Likes: ≥{self.likes_min:,}")
+            else:
+                parts.append(f"Likes: ≤{self.likes_max:,}")
+
+        if self.comments_min or self.comments_max:
+            if self.comments_min and self.comments_max:
+                parts.append(f"Comments: {self.comments_min:,}-{self.comments_max:,}")
+            elif self.comments_min:
+                parts.append(f"Comments: ≥{self.comments_min:,}")
+            else:
+                parts.append(f"Comments: ≤{self.comments_max:,}")
+
+        if self.engagement_min or self.engagement_max:
+            if self.engagement_min and self.engagement_max:
+                parts.append(f"Engagement: {self.engagement_min:.1f}%-{self.engagement_max:.1f}%")
+            elif self.engagement_min:
+                parts.append(f"Engagement: ≥{self.engagement_min:.1f}%")
+            else:
+                parts.append(f"Engagement: ≤{self.engagement_max:.1f}%")
+
+        if self.search_text:
+            parts.append(f"Search: '{self.search_text}'")
+
+        return " | ".join(parts) if parts else "No filters"
+
+
+@dataclass
+class DayOfWeekPattern:
+    """Performance pattern for a specific day of the week"""
+    day_name: str  # Monday, Tuesday, etc.
+    day_index: int  # 0 = Monday, 6 = Sunday
+    video_count: int
+    avg_views: float
+    avg_engagement: float
+    avg_like_ratio: float
+    total_views: int
+
+    @property
+    def performance_score(self) -> float:
+        """Calculate overall performance score for this day"""
+        if self.video_count == 0:
+            return 0.0
+        # Weighted score: 40% views, 40% engagement, 20% like ratio
+        normalized_views = min(self.avg_views / 10000, 10.0)  # Cap at 100K views = 10 points
+        return (normalized_views * 0.4) + (self.avg_engagement * 0.4) + (self.avg_like_ratio * 0.2)
+
+
+@dataclass
+class HourOfDayPattern:
+    """Performance pattern for a specific hour of the day"""
+    hour: int  # 0-23
+    video_count: int
+    avg_views: float
+    avg_engagement: float
+    avg_like_ratio: float
+    total_views: int
+
+    @property
+    def performance_score(self) -> float:
+        """Calculate overall performance score for this hour"""
+        if self.video_count == 0:
+            return 0.0
+        normalized_views = min(self.avg_views / 10000, 10.0)
+        return (normalized_views * 0.4) + (self.avg_engagement * 0.4) + (self.avg_like_ratio * 0.2)
+
+
+@dataclass
+class SeasonalPattern:
+    """Performance pattern for a specific month or season"""
+    month: int  # 1-12
+    month_name: str
+    video_count: int
+    avg_views: float
+    avg_engagement: float
+    avg_like_ratio: float
+    total_views: int
+
+    @property
+    def performance_score(self) -> float:
+        """Calculate overall performance score for this month"""
+        if self.video_count == 0:
+            return 0.0
+        normalized_views = min(self.avg_views / 10000, 10.0)
+        return (normalized_views * 0.4) + (self.avg_engagement * 0.4) + (self.avg_like_ratio * 0.2)
+
+
+@dataclass
+class PublicationRecommendation:
+    """Recommendation for optimal publication timing"""
+    best_day: str
+    best_day_score: float
+    best_hour: int
+    best_hour_score: float
+    best_month: str
+    best_month_score: float
+    worst_day: str
+    worst_day_score: float
+    worst_hour: int
+    worst_hour_score: float
+    worst_month: str
+    worst_month_score: float
+
+    def get_summary(self) -> str:
+        """Get human-readable summary of recommendations"""
+        return f"Best: {self.best_day} at {self.best_hour}:00 (Score: {self.best_day_score:.1f}) | Worst: {self.worst_day} at {self.worst_hour}:00"
+
+
+@dataclass
+class ChannelComparison:
+    """Comparison metrics for a channel"""
+    channel_id: str
+    channel_name: str
+    subscriber_count: int
+    video_count: int
+    total_views: int
+    avg_views_per_video: float
+    avg_engagement_rate: float
+    subscriber_growth: int
+    subscriber_growth_percent: float
+    view_growth: int
+    view_growth_percent: float
+
+    @property
+    def performance_score(self) -> float:
+        """Calculate overall performance score"""
+        # Weighted score based on key metrics
+        # 30% engagement, 30% growth rate, 40% views per video (normalized)
+        normalized_views = min(self.avg_views_per_video / 10000, 10.0)  # Cap at 100K = 10 points
+        normalized_engagement = min(self.avg_engagement_rate, 10.0)
+        normalized_growth = min(abs(self.subscriber_growth_percent) / 10, 10.0)  # Cap at 100% = 10 points
+
+        return (normalized_engagement * 0.3) + (normalized_growth * 0.3) + (normalized_views * 0.4)

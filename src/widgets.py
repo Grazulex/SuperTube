@@ -7,7 +7,7 @@ from textual.widgets import DataTable, Static, Label
 from textual.containers import Container, Vertical, Horizontal
 from textual.reactive import reactive
 
-from .models import Channel, Video
+from .models import Channel, Video, Alert, VideoFilter
 
 
 class DashboardWidget(Static):
@@ -791,7 +791,9 @@ class VideosListPanel(Static):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.videos: List[Video] = []
+        self.all_videos: List[Video] = []  # All videos before filtering
+        self.videos: List[Video] = []  # Filtered videos
+        self.filter: VideoFilter = VideoFilter()  # Active filter
         self.can_focus = True
         self.sort_key = "views"  # Default sort by views
         self.sort_reverse = True  # Descending by default (most views first)
@@ -811,13 +813,66 @@ class VideosListPanel(Static):
 
     def update_videos(self, videos: List[Video]) -> None:
         """Update the videos list"""
-        self.videos = videos
+        self.all_videos = videos
+        self._apply_filter()
         self._sort_videos()
         self._refresh_table()
 
         # Auto-select first video
         if self.videos and not self.selected_video_id:
             self.selected_video_id = self.videos[0].id
+
+    def _apply_filter(self) -> None:
+        """Apply current filter to videos"""
+        if not self.filter.is_active():
+            self.videos = self.all_videos.copy()
+        else:
+            self.videos = [v for v in self.all_videos if self.filter.matches(v)]
+
+    def set_filter(self, filter: VideoFilter) -> None:
+        """Set filter and refresh"""
+        self.filter = filter
+        self._apply_filter()
+        self._sort_videos()
+        self._refresh_table()
+
+    def clear_filter(self) -> None:
+        """Clear all filters"""
+        self.filter = VideoFilter()
+        self._apply_filter()
+        self._sort_videos()
+        self._refresh_table()
+
+    def set_filter_preset(self, preset: str) -> str:
+        """Set a predefined filter and return description"""
+        from datetime import timedelta, timezone
+        # Use UTC timezone to match video timestamps
+        today = datetime.now(timezone.utc)
+
+        if preset == "recent":
+            # Videos from last 7 days
+            self.filter = VideoFilter(date_from=today - timedelta(days=7))
+            desc = "Recent videos (7 days)"
+        elif preset == "popular":
+            # Videos with > 10K views
+            self.filter = VideoFilter(views_min=10000)
+            desc = "Popular videos (>10K views)"
+        elif preset == "high_engagement":
+            # Videos with engagement > 5%
+            self.filter = VideoFilter(engagement_min=5.0)
+            desc = "High engagement (>5%)"
+        elif preset == "viral":
+            # Videos with > 100K views
+            self.filter = VideoFilter(views_min=100000)
+            desc = "Viral videos (>100K views)"
+        else:
+            self.clear_filter()
+            desc = "No filter"
+
+        self._apply_filter()
+        self._sort_videos()
+        self._refresh_table()
+        return desc
 
     def _sort_videos(self) -> None:
         """Sort videos by current sort key"""
@@ -941,7 +996,7 @@ class MainViewPanel(Static):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.current_mode = "dashboard"  # "dashboard", "topflop", etc.
+        self.current_mode = "dashboard"  # "dashboard", "topflop", "temporal", "comparison"
         self.current_channel: Optional[Channel] = None
         self.channel_history: Optional[List] = None
 
@@ -952,6 +1007,10 @@ class MainViewPanel(Static):
             yield Static(id="main_view_content", classes="main-view-content")
             # Top/Flop widget (visible in topflop mode)
             yield TopFlopWidget(id="topflop_widget")
+            # Temporal Analysis panel (visible in temporal mode)
+            yield TemporalAnalysisPanel(id="temporal_panel")
+            # Channel Comparison panel (visible in comparison mode)
+            yield ChannelComparisonPanel(id="comparison_panel")
 
     def on_mount(self) -> None:
         """Initialize widget visibility based on mode"""
@@ -973,13 +1032,29 @@ class MainViewPanel(Static):
         try:
             content = self.query_one("#main_view_content", Static)
             topflop = self.query_one("#topflop_widget", TopFlopWidget)
+            temporal = self.query_one("#temporal_panel", TemporalAnalysisPanel)
+            comparison = self.query_one("#comparison_panel", ChannelComparisonPanel)
 
             if self.current_mode == "dashboard":
                 content.display = True
                 topflop.display = False
+                temporal.display = False
+                comparison.display = False
             elif self.current_mode == "topflop":
                 content.display = False
                 topflop.display = True
+                temporal.display = False
+                comparison.display = False
+            elif self.current_mode == "temporal":
+                content.display = False
+                topflop.display = False
+                temporal.display = True
+                comparison.display = False
+            elif self.current_mode == "comparison":
+                content.display = False
+                topflop.display = False
+                temporal.display = False
+                comparison.display = True
         except:
             pass
 
@@ -992,6 +1067,10 @@ class MainViewPanel(Static):
             self._show_dashboard_view(content)
         elif self.current_mode == "topflop":
             self._show_topflop_view()
+        elif self.current_mode == "temporal":
+            self._show_temporal_view()
+        elif self.current_mode == "comparison":
+            self._show_comparison_view()
         else:
             content = self.query_one("#main_view_content", Static)
             content.update(f"[dim]Mode: {self.current_mode}[/dim]")
@@ -1113,3 +1192,296 @@ Change: [{views_color}]{views_sign}{views_change:,}[/{views_color}] ([{views_col
                 )
         except Exception:
             pass
+
+    def _show_temporal_view(self) -> None:
+        """Show Temporal Analysis panel with data"""
+        try:
+            temporal = self.query_one("#temporal_panel", TemporalAnalysisPanel)
+
+            # Trigger data loading from app if we have a channel selected
+            if self.current_channel and hasattr(self.app, 'load_temporal_data'):
+                self.app.load_temporal_data(self.current_channel.id, temporal)
+            else:
+                # No channel selected - show placeholder
+                temporal.query_one("#temporal_content", Static).update(
+                    "[yellow]Select a channel to view temporal analysis[/yellow]"
+                )
+        except Exception:
+            pass
+
+    def _show_comparison_view(self) -> None:
+        """Show Channel Comparison panel with data"""
+        try:
+            comparison = self.query_one("#comparison_panel", ChannelComparisonPanel)
+
+            # Trigger data loading from app
+            if hasattr(self.app, 'load_comparison_data'):
+                self.app.load_comparison_data(comparison)
+            else:
+                # Show placeholder
+                comparison.query_one("#comparison_controls", Static).update(
+                    "[yellow]Loading comparison data...[/yellow]"
+                )
+        except Exception:
+            pass
+
+
+class AlertsPanel(Static):
+    """Panel showing recent alerts and notifications"""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.alerts: List[Alert] = []
+
+    def compose(self) -> ComposeResult:
+        """Create child widgets"""
+        with Vertical():
+            yield Label("[bold cyan]🔔 Alerts[/bold cyan]", classes="panel-title")
+            yield Static(id="alerts_content", classes="details-content")
+
+    def update_alerts(self, alerts: List[Alert]) -> None:
+        """Update the alerts display"""
+        self.alerts = alerts
+        content = self.query_one("#alerts_content", Static)
+
+        if not alerts:
+            content.update("[dim]No alerts[/dim]")
+            return
+
+        # Build alert list (limit to 10 most recent)
+        alert_lines = []
+        for alert in alerts[:10]:
+            # Icon based on alert type
+            if alert.alert_type == "success":
+                icon = "✅"
+                color = "green"
+            elif alert.alert_type == "warning":
+                icon = "⚠️"
+                color = "yellow"
+            else:  # danger
+                icon = "🔴"
+                color = "red"
+
+            # Format message
+            alert_lines.append(f"[{color}]{icon}[/{color}] {alert.message}")
+
+        content.update("\n".join(alert_lines))
+
+
+class TemporalAnalysisPanel(Static):
+    """Panel showing temporal patterns and publication recommendations"""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.current_channel_name = ""
+        self.day_patterns = []
+        self.hour_patterns = []
+        self.month_patterns = []
+        self.recommendations = None
+
+    def compose(self) -> ComposeResult:
+        """Create child widgets"""
+        with Vertical():
+            yield Label("[bold cyan]⏰ Temporal Analysis[/bold cyan]", classes="panel-title")
+            yield Static(id="temporal_content", classes="details-content")
+
+    def update_patterns(
+        self,
+        channel_name: str,
+        day_patterns: List,
+        hour_patterns: List,
+        month_patterns: List,
+        recommendations
+    ) -> None:
+        """Update the temporal analysis display"""
+        self.current_channel_name = channel_name
+        self.day_patterns = day_patterns
+        self.hour_patterns = hour_patterns
+        self.month_patterns = month_patterns
+        self.recommendations = recommendations
+
+        content = self.query_one("#temporal_content", Static)
+
+        # Build display
+        sections = []
+
+        # Publication recommendations
+        if recommendations:
+            sections.append(
+                f"[bold yellow]📌 Best Publishing Times:[/bold yellow]\n"
+                f"Day: [green]{recommendations.best_day}[/green] (Score: {recommendations.best_day_score:.1f})\n"
+                f"Hour: [green]{recommendations.best_hour:02d}:00[/green] (Score: {recommendations.best_hour_score:.1f})\n"
+                f"Month: [green]{recommendations.best_month}[/green] (Score: {recommendations.best_month_score:.1f})"
+            )
+
+        # Day of week patterns (show top 3)
+        valid_days = [p for p in day_patterns if p.video_count > 0]
+        if valid_days:
+            sorted_days = sorted(valid_days, key=lambda p: p.performance_score, reverse=True)
+            top_days = sorted_days[:3]
+            day_lines = ["[bold]🗓️  Top Days:[/bold]"]
+            for i, pattern in enumerate(top_days, 1):
+                day_lines.append(
+                    f"{i}. {pattern.day_name}: {pattern.video_count} videos, "
+                    f"avg {pattern.avg_views:,.0f} views (Score: {pattern.performance_score:.1f})"
+                )
+            sections.append("\n".join(day_lines))
+
+        # Hour of day patterns (show top 3)
+        valid_hours = [p for p in hour_patterns if p.video_count > 0]
+        if valid_hours:
+            sorted_hours = sorted(valid_hours, key=lambda p: p.performance_score, reverse=True)
+            top_hours = sorted_hours[:3]
+            hour_lines = ["[bold]🕐 Top Hours:[/bold]"]
+            for i, pattern in enumerate(top_hours, 1):
+                hour_lines.append(
+                    f"{i}. {pattern.hour:02d}:00: {pattern.video_count} videos, "
+                    f"avg {pattern.avg_views:,.0f} views (Score: {pattern.performance_score:.1f})"
+                )
+            sections.append("\n".join(hour_lines))
+
+        # Monthly patterns (show top 3)
+        valid_months = [p for p in month_patterns if p.video_count > 0]
+        if valid_months:
+            sorted_months = sorted(valid_months, key=lambda p: p.performance_score, reverse=True)
+            top_months = sorted_months[:3]
+            month_lines = ["[bold]📅 Top Months:[/bold]"]
+            for i, pattern in enumerate(top_months, 1):
+                month_lines.append(
+                    f"{i}. {pattern.month_name}: {pattern.video_count} videos, "
+                    f"avg {pattern.avg_views:,.0f} views (Score: {pattern.performance_score:.1f})"
+                )
+            sections.append("\n".join(month_lines))
+
+        if sections:
+            content.update("\n\n".join(sections))
+        else:
+            content.update("[dim]Not enough data for temporal analysis[/dim]")
+
+
+class ChannelComparisonPanel(Static):
+    """Panel showing side-by-side comparison of all channels"""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.comparisons: List = []
+        self.sort_metric = "performance"  # Default sort by performance score
+
+    def compose(self) -> ComposeResult:
+        """Create child widgets"""
+        with Vertical():
+            yield Label("[bold cyan]📊 Channel Comparison[/bold cyan]", classes="panel-title")
+            yield Static(id="comparison_controls", classes="stats-box")
+            yield DataTable(id="comparison_table", zebra_stripes=True)
+
+    def on_mount(self) -> None:
+        """Initialize the table"""
+        table = self.query_one("#comparison_table", DataTable)
+        # Setup columns
+        table.add_column("Channel", key="channel", width=20)
+        table.add_column("Subs", key="subs", width=10)
+        table.add_column("Videos", key="videos", width=8)
+        table.add_column("Avg Views", key="avg_views", width=12)
+        table.add_column("Engagement", key="engagement", width=12)
+        table.add_column("Growth", key="growth", width=12)
+        table.add_column("Score", key="score", width=8)
+
+    def update_comparisons(self, comparisons: List) -> None:
+        """Update the comparison table with channel data"""
+        self.comparisons = comparisons
+        self._sort_comparisons()
+        self._refresh_table()
+
+        # Update controls
+        controls = self.query_one("#comparison_controls", Static)
+        sort_labels = {
+            "performance": "Performance Score",
+            "subs": "Subscribers",
+            "engagement": "Engagement Rate",
+            "growth": "Growth Rate",
+            "views": "Avg Views"
+        }
+        controls.update(
+            f"[dim]Sorted by: [yellow]{sort_labels.get(self.sort_metric, 'Performance')}[/yellow] | "
+            f"Press 'm' to cycle sort metric | Press 'd' to return to dashboard[/dim]"
+        )
+
+    def _sort_comparisons(self) -> None:
+        """Sort comparisons by current metric"""
+        sort_keys = {
+            "performance": lambda c: c.performance_score,
+            "subs": lambda c: c.subscriber_count,
+            "engagement": lambda c: c.avg_engagement_rate,
+            "growth": lambda c: c.subscriber_growth_percent,
+            "views": lambda c: c.avg_views_per_video
+        }
+
+        if self.sort_metric in sort_keys:
+            self.comparisons.sort(key=sort_keys[self.sort_metric], reverse=True)
+
+    def _refresh_table(self) -> None:
+        """Refresh the table with current comparison data"""
+        table = self.query_one("#comparison_table", DataTable)
+        table.clear(columns=False)
+
+        for comp in self.comparisons:
+            # Format numbers
+            subs_fmt = f"{comp.subscriber_count / 1000000:.1f}M" if comp.subscriber_count >= 1000000 else f"{comp.subscriber_count / 1000:.1f}K"
+            videos_fmt = str(comp.video_count)
+            avg_views_fmt = f"{comp.avg_views_per_video / 1000:.1f}K" if comp.avg_views_per_video >= 1000 else f"{comp.avg_views_per_video:.0f}"
+
+            # Growth with color
+            growth_color = "green" if comp.subscriber_growth_percent >= 0 else "red"
+            growth_fmt = f"[{growth_color}]{comp.subscriber_growth_percent:+.1f}%[/{growth_color}]"
+
+            # Engagement with color (green if > 3%, yellow if > 1%, else white)
+            if comp.avg_engagement_rate >= 3.0:
+                eng_color = "green"
+            elif comp.avg_engagement_rate >= 1.0:
+                eng_color = "yellow"
+            else:
+                eng_color = "white"
+            eng_fmt = f"[{eng_color}]{comp.avg_engagement_rate:.2f}%[/{eng_color}]"
+
+            # Performance score with color
+            score = comp.performance_score
+            if score >= 7.0:
+                score_color = "green"
+            elif score >= 4.0:
+                score_color = "yellow"
+            else:
+                score_color = "red"
+            score_fmt = f"[{score_color}]{score:.1f}[/{score_color}]"
+
+            table.add_row(
+                comp.channel_name[:18] + ".." if len(comp.channel_name) > 20 else comp.channel_name,
+                f"[green]{subs_fmt}[/green]",
+                f"[blue]{videos_fmt}[/blue]",
+                f"[yellow]{avg_views_fmt}[/yellow]",
+                eng_fmt,
+                growth_fmt,
+                score_fmt,
+                key=comp.channel_id
+            )
+
+    def cycle_sort_metric(self) -> str:
+        """Cycle through sort metrics and return description"""
+        metrics = ["performance", "subs", "engagement", "growth", "views"]
+        current_index = metrics.index(self.sort_metric) if self.sort_metric in metrics else 0
+        next_index = (current_index + 1) % len(metrics)
+        self.sort_metric = metrics[next_index]
+
+        self._sort_comparisons()
+        self._refresh_table()
+
+        # Update controls display
+        self.update_comparisons(self.comparisons)
+
+        metric_labels = {
+            "performance": "Performance Score",
+            "subs": "Subscribers",
+            "engagement": "Engagement Rate",
+            "growth": "Growth Rate",
+            "views": "Avg Views"
+        }
+        return f"Sorted by {metric_labels[self.sort_metric]}"

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import aiosqlite
 
-from .models import Channel, Video, ChannelStats, VideoStats, ChangeDetection
+from .models import Channel, Video, ChannelStats, VideoStats, ChangeDetection, Alert
 
 
 class DatabaseManager:
@@ -104,6 +104,34 @@ class DatabaseManager:
             await db.execute("""
                 CREATE INDEX IF NOT EXISTS idx_video_stats
                 ON video_stats_history(video_id, timestamp)
+            """)
+
+            # Alerts table
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS alerts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    channel_id TEXT,
+                    video_id TEXT,
+                    metric TEXT NOT NULL,
+                    threshold_value REAL NOT NULL,
+                    actual_value REAL NOT NULL,
+                    alert_type TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    triggered_at TEXT NOT NULL,
+                    acknowledged INTEGER DEFAULT 0,
+                    FOREIGN KEY (channel_id) REFERENCES channels(id),
+                    FOREIGN KEY (video_id) REFERENCES videos(id)
+                )
+            """)
+
+            await db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_alerts_channel
+                ON alerts(channel_id, triggered_at)
+            """)
+
+            await db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_alerts_acknowledged
+                ON alerts(acknowledged, triggered_at)
             """)
 
             await db.commit()
@@ -592,3 +620,197 @@ class DatabaseManager:
             # Sort by growth (ascending) and return bottom N
             video_growth.sort(key=lambda x: x[1])
             return video_growth[:limit]
+
+    async def save_alert(self, alert: Alert) -> int:
+        """
+        Save an alert to the database
+
+        Args:
+            alert: Alert object to save
+
+        Returns:
+            ID of the saved alert
+        """
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("""
+                INSERT INTO alerts
+                (channel_id, video_id, metric, threshold_value, actual_value,
+                 alert_type, message, triggered_at, acknowledged)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                alert.channel_id,
+                alert.video_id,
+                alert.metric,
+                alert.threshold_value,
+                alert.actual_value,
+                alert.alert_type,
+                alert.message,
+                alert.triggered_at.isoformat() if alert.triggered_at else datetime.utcnow().isoformat(),
+                1 if alert.acknowledged else 0
+            ))
+            await db.commit()
+            return cursor.lastrowid
+
+    async def get_alerts(
+        self,
+        channel_id: Optional[str] = None,
+        acknowledged: Optional[bool] = None,
+        limit: int = 50
+    ) -> List[Alert]:
+        """
+        Get alerts from database
+
+        Args:
+            channel_id: Filter by channel ID (optional)
+            acknowledged: Filter by acknowledged status (optional)
+            limit: Maximum number of alerts to return
+
+        Returns:
+            List of Alert objects, ordered by triggered_at (newest first)
+        """
+        alerts = []
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+
+            # Build query based on filters
+            query = "SELECT * FROM alerts WHERE 1=1"
+            params = []
+
+            if channel_id is not None:
+                query += " AND channel_id = ?"
+                params.append(channel_id)
+
+            if acknowledged is not None:
+                query += " AND acknowledged = ?"
+                params.append(1 if acknowledged else 0)
+
+            query += " ORDER BY triggered_at DESC LIMIT ?"
+            params.append(limit)
+
+            async with db.execute(query, params) as cursor:
+                async for row in cursor:
+                    alerts.append(Alert(
+                        id=row['id'],
+                        channel_id=row['channel_id'],
+                        video_id=row['video_id'],
+                        metric=row['metric'],
+                        threshold_value=row['threshold_value'],
+                        actual_value=row['actual_value'],
+                        alert_type=row['alert_type'],
+                        message=row['message'],
+                        triggered_at=datetime.fromisoformat(row['triggered_at']),
+                        acknowledged=bool(row['acknowledged'])
+                    ))
+        return alerts
+
+    async def get_alert_history(
+        self,
+        days: int = 7,
+        channel_id: Optional[str] = None
+    ) -> List[Alert]:
+        """
+        Get alert history for a period
+
+        Args:
+            days: Number of days of history to retrieve
+            channel_id: Filter by channel ID (optional)
+
+        Returns:
+            List of Alert objects, ordered by triggered_at (newest first)
+        """
+        since = datetime.utcnow() - timedelta(days=days)
+        alerts = []
+
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+
+            if channel_id:
+                query = """
+                    SELECT * FROM alerts
+                    WHERE channel_id = ? AND triggered_at >= ?
+                    ORDER BY triggered_at DESC
+                """
+                params = (channel_id, since.isoformat())
+            else:
+                query = """
+                    SELECT * FROM alerts
+                    WHERE triggered_at >= ?
+                    ORDER BY triggered_at DESC
+                """
+                params = (since.isoformat(),)
+
+            async with db.execute(query, params) as cursor:
+                async for row in cursor:
+                    alerts.append(Alert(
+                        id=row['id'],
+                        channel_id=row['channel_id'],
+                        video_id=row['video_id'],
+                        metric=row['metric'],
+                        threshold_value=row['threshold_value'],
+                        actual_value=row['actual_value'],
+                        alert_type=row['alert_type'],
+                        message=row['message'],
+                        triggered_at=datetime.fromisoformat(row['triggered_at']),
+                        acknowledged=bool(row['acknowledged'])
+                    ))
+        return alerts
+
+    async def acknowledge_alert(self, alert_id: int) -> None:
+        """
+        Mark an alert as acknowledged
+
+        Args:
+            alert_id: ID of the alert to acknowledge
+        """
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("""
+                UPDATE alerts
+                SET acknowledged = 1
+                WHERE id = ?
+            """, (alert_id,))
+            await db.commit()
+
+    async def acknowledge_all_alerts(self, channel_id: Optional[str] = None) -> int:
+        """
+        Mark all alerts as acknowledged
+
+        Args:
+            channel_id: Filter by channel ID (optional)
+
+        Returns:
+            Number of alerts acknowledged
+        """
+        async with aiosqlite.connect(self.db_path) as db:
+            if channel_id:
+                cursor = await db.execute("""
+                    UPDATE alerts
+                    SET acknowledged = 1
+                    WHERE channel_id = ? AND acknowledged = 0
+                """, (channel_id,))
+            else:
+                cursor = await db.execute("""
+                    UPDATE alerts
+                    SET acknowledged = 1
+                    WHERE acknowledged = 0
+                """)
+            await db.commit()
+            return cursor.rowcount
+
+    async def clear_old_alerts(self, days: int = 30) -> int:
+        """
+        Remove alerts older than specified days
+
+        Args:
+            days: Keep alerts for this many days
+
+        Returns:
+            Number of alerts deleted
+        """
+        cutoff = datetime.utcnow() - timedelta(days=days)
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("""
+                DELETE FROM alerts
+                WHERE triggered_at < ?
+            """, (cutoff.isoformat(),))
+            await db.commit()
+            return cursor.rowcount
