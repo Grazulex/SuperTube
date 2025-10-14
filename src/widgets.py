@@ -742,15 +742,17 @@ class ChannelsListPanel(Static):
     def cycle_sort(self) -> str:
         """Cycle through sort options and return description"""
         sort_options = ["name", "subs"]
-        current_index = sort_options.index(self.sort_key) if self.sort_key in sort_options else 0
+        current_index = sort_options.index(self.sort_key) if self.sort_key in sort_options else -1
 
-        # If same key, toggle direction
-        if self.sort_key == sort_options[current_index]:
-            self.sort_reverse = not self.sort_reverse
-        else:
-            # New key, start ascending
-            self.sort_key = sort_options[(current_index + 1) % len(sort_options)]
-            self.sort_reverse = False
+        # Move to next sort option
+        next_index = (current_index + 1) % len(sort_options)
+        self.sort_key = sort_options[next_index]
+
+        # Set sensible default direction for each key
+        if self.sort_key == "name":
+            self.sort_reverse = False  # A-Z
+        else:  # subs
+            self.sort_reverse = True  # High to low
 
         self._sort_channels()
         self._refresh_table()
@@ -854,15 +856,17 @@ class VideosListPanel(Static):
     def cycle_sort(self) -> str:
         """Cycle through sort options and return description"""
         sort_options = ["views", "date"]
-        current_index = sort_options.index(self.sort_key) if self.sort_key in sort_options else 0
+        current_index = sort_options.index(self.sort_key) if self.sort_key in sort_options else -1
 
-        # If same key, toggle direction
-        if self.sort_key == sort_options[current_index]:
-            self.sort_reverse = not self.sort_reverse
-        else:
-            # New key, start descending (most views/newest first)
-            self.sort_key = sort_options[(current_index + 1) % len(sort_options)]
-            self.sort_reverse = True
+        # Move to next sort option
+        next_index = (current_index + 1) % len(sort_options)
+        self.sort_key = sort_options[next_index]
+
+        # Set sensible default direction for each key
+        if self.sort_key == "views":
+            self.sort_reverse = True  # High to low
+        else:  # date
+            self.sort_reverse = True  # Newest first
 
         self._sort_videos()
         self._refresh_table()
@@ -911,20 +915,10 @@ class VideoDetailsPanel(Static):
         likes_fmt = f"{video.like_count:,}"
         comments_fmt = f"{video.comment_count:,}"
 
-        details = f"""[bold]{video.title[:28]}...[/bold]
-
-[dim]Published:[/dim] {video.published_at.strftime('%Y-%m-%d')}
-[dim]Duration:[/dim] {video.formatted_duration}
-
-[bold yellow]Stats:[/bold yellow]
-Views: {views_fmt}
-Likes: {likes_fmt}
-Cmnts: {comments_fmt}
-
-[bold magenta]Engagement:[/bold magenta]
-Like Rate: {engagement_rate:.2f}%
-Cmnt/1k: {comments_per_1k:.1f}
-"""
+        details = f"""[bold]{video.title[:25]}...[/bold]
+{video.published_at.strftime('%Y-%m-%d')} | {video.formatted_duration}
+[yellow]V:[/yellow]{views_fmt} [green]L:[/green]{likes_fmt} [blue]C:[/blue]{comments_fmt}
+[magenta]Rate:[/magenta]{engagement_rate:.1f}% [magenta]C/1k:[/magenta]{comments_per_1k:.0f}"""
         content.update(details)
 
 
@@ -995,43 +989,73 @@ Avg Views/Vid: [yellow]{avg_views:,}[/yellow]
     def _generate_channel_graphs(self) -> str:
         """Generate ASCII graphs for channel trends"""
         try:
-            import plotext as plt
-            from io import StringIO
-
             if not self.channel_history or len(self.channel_history) < 2:
                 return "[dim]Not enough data for graphs[/dim]"
 
+            # For small datasets (< 5 points), show simple comparison instead of graph
+            if len(self.channel_history) < 5:
+                return self._generate_simple_comparison()
+
+            # For larger datasets, use plotext
+            import plotext as plt
+
             # Extract data
-            dates = [stat.timestamp.strftime("%m-%d") for stat in self.channel_history]
             subscribers = [stat.subscriber_count for stat in self.channel_history]
             views = [stat.view_count for stat in self.channel_history]
 
             # Subscribers graph
             plt.clf()
             plt.title("Subscribers Trend (30d)")
-            plt.plot(dates, subscribers, marker="braille", color="green")
+            plt.plot(subscribers, marker="braille", color="green")
             plt.theme("dark")
             plt.plotsize(70, 10)
-
-            buffer = StringIO()
-            plt.show(buffer)
-            subs_graph = buffer.getvalue()
+            subs_graph = plt.build()
 
             # Views graph
             plt.clf()
             plt.title("Total Views Trend (30d)")
-            plt.plot(dates, views, marker="braille", color="yellow")
+            plt.plot(views, marker="braille", color="yellow")
             plt.theme("dark")
             plt.plotsize(70, 10)
-
-            buffer = StringIO()
-            plt.show(buffer)
-            views_graph = buffer.getvalue()
+            views_graph = plt.build()
 
             return f"[dim yellow]📈 Trends ({len(self.channel_history)} pts):[/dim yellow]\n\n{subs_graph}\n{views_graph}"
 
         except Exception as e:
             return f"[dim red]Error generating graphs: {e}[/dim red]"
+
+    def _generate_simple_comparison(self) -> str:
+        """Generate simple text comparison for small datasets"""
+        first = self.channel_history[0]
+        last = self.channel_history[-1]
+
+        # Calculate changes
+        subs_change = last.subscriber_count - first.subscriber_count
+        subs_pct = (subs_change / max(first.subscriber_count, 1)) * 100
+        views_change = last.view_count - first.view_count
+        views_pct = (views_change / max(first.view_count, 1)) * 100
+
+        # Format dates
+        first_date = first.timestamp.strftime("%d/%m")
+        last_date = last.timestamp.strftime("%d/%m")
+
+        # Format with colors
+        subs_color = "green" if subs_change >= 0 else "red"
+        views_color = "green" if views_change >= 0 else "red"
+        subs_sign = "+" if subs_change >= 0 else ""
+        views_sign = "+" if views_change >= 0 else ""
+
+        return f"""[dim yellow]📈 Growth ({len(self.channel_history)} data points):[/dim yellow]
+
+[bold]Subscribers:[/bold]
+{first_date}: [green]{first.subscriber_count:,}[/green]  →  {last_date}: [green]{last.subscriber_count:,}[/green]
+Change: [{subs_color}]{subs_sign}{subs_change:,}[/{subs_color}] ([{subs_color}]{subs_sign}{subs_pct:.1f}%[/{subs_color}])
+
+[bold]Total Views:[/bold]
+{first_date}: [yellow]{first.view_count:,}[/yellow]  →  {last_date}: [yellow]{last.view_count:,}[/yellow]
+Change: [{views_color}]{views_sign}{views_change:,}[/{views_color}] ([{views_color}]{views_sign}{views_pct:.1f}%[/{views_color}])
+
+[dim]Tip: More data points will show graphs[/dim]"""
 
     def _show_topflop_view(self, content: Static) -> None:
         """Show Top/Flop placeholder"""

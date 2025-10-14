@@ -407,8 +407,12 @@ class SuperTubeApp(App):
             channels_panel = self.query_one("#channels_panel", ChannelsListPanel)
 
             # Manually trigger initial selection
+            # Force reload even if channel was already selected (for refresh)
             if channels_panel.selected_channel_id:
                 self._on_channel_selected(channels_panel.selected_channel_id)
+            elif self.selected_channel_id:
+                # Use previously selected channel if any
+                self._on_channel_selected(self.selected_channel_id)
 
         except Exception as e:
             self.status_bar.set_status(f"Error setting up panels: {e}")
