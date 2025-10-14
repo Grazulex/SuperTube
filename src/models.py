@@ -80,6 +80,26 @@ class Video:
         else:
             return f"{minutes}:{seconds:02d}"
 
+    @property
+    def is_recent(self) -> bool:
+        """Check if video was published within the last 7 days (not scheduled for future)"""
+        from datetime import datetime, timedelta
+        now = datetime.now(self.published_at.tzinfo) if self.published_at.tzinfo else datetime.now()
+
+        # Don't mark future/scheduled videos as recent
+        if self.published_at > now:
+            return False
+
+        seven_days_ago = now - timedelta(days=7)
+        return self.published_at >= seven_days_ago
+
+    @property
+    def is_scheduled(self) -> bool:
+        """Check if video is scheduled for future publication"""
+        from datetime import datetime
+        now = datetime.now(self.published_at.tzinfo) if self.published_at.tzinfo else datetime.now()
+        return self.published_at > now
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization"""
         data = asdict(self)
