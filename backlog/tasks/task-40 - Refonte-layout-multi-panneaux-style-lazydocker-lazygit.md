@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@claude'
 created_date: '2025-10-14 18:58'
-updated_date: '2025-10-14 19:15'
+updated_date: '2025-10-14 19:50'
 labels: []
 dependencies: []
 priority: high
@@ -25,7 +25,7 @@ Refactoriser le layout actuel pour adopter une interface multi-panneaux inspiré
 - [x] #4 Implémenter navigation Tab entre panneaux gauche
 - [x] #5 Mettre à jour Panel 4 (stats) selon sélection active
 - [x] #6 Adapter tous les bindings clavier au nouveau système
-- [ ] #7 Tester responsive sur différentes tailles de terminal
+- [x] #7 Tester responsive sur différentes tailles de terminal
 - [x] #8 Navigation ↑↓ sélectionne automatiquement (pas de Enter nécessaire)
 <!-- AC:END -->
 
@@ -145,4 +145,13 @@ Refactoriser le layout actuel pour adopter une interface multi-panneaux inspiré
 
 **Inspirations** : lazydocker, lazygit, k9s
 **Résultat** : UX moderne et efficace pour power users
+
+## Latest Fixes (2025-10-14 19:30)
+
+✅ Fixed sorting logic: properly cycles through all options (Name↔Subs, Views↔Date)
+✅ Compacted Details panel: 4 lines instead of 9 to fit in 34% height
+✅ Fixed plotext graphs: simple comparison for <5 points, real graphs for 5+
+✅ Fixed refresh: force reload main panel even when same channel selected
+
+All acceptance criteria completed and tested!
 <!-- SECTION:NOTES:END -->
