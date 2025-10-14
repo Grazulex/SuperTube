@@ -263,28 +263,29 @@ class YouTubeClient:
 
     def get_scheduled_videos(self, channel_id: str, max_results: int = 50) -> List[Video]:
         """
-        Get scheduled (upcoming) live streams and premieres
+        Attempt to get scheduled videos using multiple methods
 
-        Note: Regular scheduled videos are private/unlisted until publication
-        and cannot be retrieved via YouTube API. Only live streams with
-        eventType="upcoming" can be retrieved.
+        Note: YouTube API has severe limitations for scheduled videos:
+        - Regular scheduled videos are private/unlisted until publication
+        - Only live streams/premieres can be retrieved via eventType="upcoming"
+        - Even channel owners cannot access their own scheduled videos via standard API
+
+        This method tries multiple approaches but may still return empty.
 
         Args:
             channel_id: The YouTube channel ID
             max_results: Maximum number of videos to fetch (default 50)
 
         Returns:
-            List of Video objects for upcoming live streams/premieres
-
-        Raises:
-            YouTubeAPIError: If API request fails
+            List of Video objects (may be empty due to API limitations)
         """
         if not self.service:
             raise YouTubeAPIError("Not authenticated. Call authenticate() first.")
 
+        scheduled_videos = []
+
+        # Method 1: Try upcoming live streams and premieres
         try:
-            # Search for upcoming live streams and premieres
-            # Note: eventType="upcoming" only works for live broadcasts, not regular scheduled videos
             request = self.service.search().list(
                 part="snippet",
                 channelId=channel_id,
@@ -295,19 +296,40 @@ class YouTubeClient:
             response = request.execute()
 
             video_ids = [item['id']['videoId'] for item in response.get('items', [])]
+            if video_ids:
+                scheduled_videos.extend(self._get_video_details(video_ids, channel_id))
+        except:
+            pass
 
-            if not video_ids:
-                return []
+        # Method 2: Try to get user's own videos with forMine parameter
+        # This might work if the authenticated user owns the channel
+        try:
+            request = self.service.search().list(
+                part="snippet",
+                forMine=True,
+                type="video",
+                maxResults=min(50, max_results),
+                order="date"
+            )
+            response = request.execute()
 
-            # Get detailed info for scheduled videos
-            return self._get_video_details(video_ids, channel_id)
+            # Filter videos by channel_id and check for future dates
+            from datetime import datetime, timezone
+            now = datetime.now(timezone.utc)
 
-        except HttpError as e:
-            # Silently return empty list on error
-            # Most likely case: no upcoming live streams or insufficient permissions
-            return []
-        except (KeyError, ValueError) as e:
-            return []
+            for item in response.get('items', []):
+                if item['snippet']['channelId'] == channel_id:
+                    video_id = item['id']['videoId']
+                    # Get full video details
+                    videos = self._get_video_details([video_id], channel_id)
+                    for video in videos:
+                        # Check if published date is in the future
+                        if video.published_at > now:
+                            scheduled_videos.append(video)
+        except:
+            pass
+
+        return scheduled_videos
 
     def get_quota_usage(self) -> Optional[Dict[str, Any]]:
         """
