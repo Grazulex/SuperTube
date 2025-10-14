@@ -683,6 +683,8 @@ class ChannelsListPanel(Static):
         super().__init__(**kwargs)
         self.channels: List[Channel] = []
         self.can_focus = True
+        self.sort_key = "name"  # Default sort by name
+        self.sort_reverse = False  # Ascending by default
 
     def compose(self) -> ComposeResult:
         """Create child widgets"""
@@ -700,10 +702,29 @@ class ChannelsListPanel(Static):
     def update_channels(self, channels: List[Channel]) -> None:
         """Update the channels list"""
         self.channels = channels
+        self._sort_channels()
+        self._refresh_table()
+
+        # Auto-select first channel
+        if self.channels and not self.selected_channel_id:
+            self.selected_channel_id = self.channels[0].id
+
+    def _sort_channels(self) -> None:
+        """Sort channels by current sort key"""
+        sort_keys = {
+            "name": lambda c: c.name.lower(),
+            "subs": lambda c: c.subscriber_count
+        }
+
+        if self.sort_key in sort_keys:
+            self.channels.sort(key=sort_keys[self.sort_key], reverse=self.sort_reverse)
+
+    def _refresh_table(self) -> None:
+        """Refresh the table with current channel data"""
         table = self.query_one("#channels_panel_table", DataTable)
         table.clear(columns=False)
 
-        for channel in channels:
+        for channel in self.channels:
             # Format subscriber count properly
             if channel.subscriber_count >= 1000000:
                 subs_display = f"{channel.subscriber_count / 1000000:.1f}M"
@@ -718,9 +739,25 @@ class ChannelsListPanel(Static):
                 key=channel.id
             )
 
-        # Auto-select first channel
-        if channels and not self.selected_channel_id:
-            self.selected_channel_id = channels[0].id
+    def cycle_sort(self) -> str:
+        """Cycle through sort options and return description"""
+        sort_options = ["name", "subs"]
+        current_index = sort_options.index(self.sort_key) if self.sort_key in sort_options else 0
+
+        # If same key, toggle direction
+        if self.sort_key == sort_options[current_index]:
+            self.sort_reverse = not self.sort_reverse
+        else:
+            # New key, start ascending
+            self.sort_key = sort_options[(current_index + 1) % len(sort_options)]
+            self.sort_reverse = False
+
+        self._sort_channels()
+        self._refresh_table()
+
+        direction = "↓" if self.sort_reverse else "↑"
+        key_names = {"name": "Name", "subs": "Subscribers"}
+        return f"Sorted by {key_names[self.sort_key]} {direction}"
 
     def on_data_table_row_highlighted(self, event) -> None:
         """Auto-select channel on navigation (lazydocker-style)"""
@@ -740,6 +777,8 @@ class VideosListPanel(Static):
         super().__init__(**kwargs)
         self.videos: List[Video] = []
         self.can_focus = True
+        self.sort_key = "views"  # Default sort by views
+        self.sort_reverse = True  # Descending by default (most views first)
 
     def compose(self) -> ComposeResult:
         """Create child widgets"""
@@ -756,10 +795,29 @@ class VideosListPanel(Static):
     def update_videos(self, videos: List[Video]) -> None:
         """Update the videos list"""
         self.videos = videos
+        self._sort_videos()
+        self._refresh_table()
+
+        # Auto-select first video
+        if self.videos and not self.selected_video_id:
+            self.selected_video_id = self.videos[0].id
+
+    def _sort_videos(self) -> None:
+        """Sort videos by current sort key"""
+        sort_keys = {
+            "views": lambda v: v.view_count,
+            "date": lambda v: v.published_at
+        }
+
+        if self.sort_key in sort_keys:
+            self.videos.sort(key=sort_keys[self.sort_key], reverse=self.sort_reverse)
+
+    def _refresh_table(self) -> None:
+        """Refresh the table with current video data"""
         table = self.query_one("#videos_panel_table", DataTable)
         table.clear(columns=False)
 
-        for video in videos[:50]:  # Limit to 50 most recent
+        for video in self.videos[:50]:  # Limit to 50 most recent
             # Add badge for recent videos
             title = video.title
             if video.is_recent:
@@ -783,9 +841,25 @@ class VideosListPanel(Static):
                 key=video.id
             )
 
-        # Auto-select first video
-        if videos and not self.selected_video_id:
-            self.selected_video_id = videos[0].id
+    def cycle_sort(self) -> str:
+        """Cycle through sort options and return description"""
+        sort_options = ["views", "date"]
+        current_index = sort_options.index(self.sort_key) if self.sort_key in sort_options else 0
+
+        # If same key, toggle direction
+        if self.sort_key == sort_options[current_index]:
+            self.sort_reverse = not self.sort_reverse
+        else:
+            # New key, start descending (most views/newest first)
+            self.sort_key = sort_options[(current_index + 1) % len(sort_options)]
+            self.sort_reverse = True
+
+        self._sort_videos()
+        self._refresh_table()
+
+        direction = "↓" if self.sort_reverse else "↑"
+        key_names = {"views": "Views", "date": "Date"}
+        return f"Sorted by {key_names[self.sort_key]} {direction}"
 
     def on_data_table_row_highlighted(self, event) -> None:
         """Auto-select video on navigation (lazydocker-style)"""

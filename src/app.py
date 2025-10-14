@@ -673,29 +673,27 @@ class SuperTubeApp(App):
             return
 
         try:
+            from textual.widgets import DataTable
+
+            # Get focused widget
+            focused = self.focused
+
             # Check which panel has focus and sort accordingly
-            channels_panel = self.query_one("#channels_panel", ChannelsListPanel)
-            videos_panel = self.query_one("#videos_panel", VideosListPanel)
+            channels_table = self.query_one("#channels_panel_table", DataTable)
+            videos_table = self.query_one("#videos_panel_table", DataTable)
 
-            # Try channels panel first
-            try:
-                channels_table = channels_panel.query_one("#channels_panel_table")
-                if channels_table.has_focus:
-                    # Sort channels - we need to implement sorting in ChannelsListPanel
-                    self.status_bar.set_status("Channel sorting not yet implemented in panel view")
-                    return
-            except:
-                pass
-
-            # Try videos panel
-            try:
-                videos_table = videos_panel.query_one("#videos_panel_table")
-                if videos_table.has_focus:
-                    # Sort videos - we need to implement sorting in VideosListPanel
-                    self.status_bar.set_status("Video sorting not yet implemented in panel view")
-                    return
-            except:
-                pass
+            if focused == channels_table:
+                # Sort channels panel
+                channels_panel = self.query_one("#channels_panel", ChannelsListPanel)
+                sort_desc = channels_panel.cycle_sort()
+                self.status_bar.set_status(f"Channels: {sort_desc}")
+            elif focused == videos_table:
+                # Sort videos panel
+                videos_panel = self.query_one("#videos_panel", VideosListPanel)
+                sort_desc = videos_panel.cycle_sort()
+                self.status_bar.set_status(f"Videos: {sort_desc}")
+            else:
+                self.status_bar.set_status("Focus a panel first (Channels or Videos)")
 
         except Exception as e:
             self.status_bar.set_status(f"Sort error: {e}")
@@ -774,8 +772,16 @@ class SuperTubeApp(App):
             self.show_topflop_view(self.selected_channel_id)
 
     def on_key(self, event) -> None:
-        """Handle key events for special keys like / and y"""
+        """Handle key events for special keys like Tab, /, and y"""
         from textual.widgets import Input
+
+        # Handle Tab for panel navigation in dashboard view
+        if event.key == "tab":
+            if self.current_view == "dashboard":
+                self.action_next_panel()
+                event.prevent_default()
+                event.stop()
+                return
 
         # Handle / for search in video list
         if event.key == "slash" or event.key == "/":
