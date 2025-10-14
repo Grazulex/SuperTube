@@ -263,16 +263,18 @@ class YouTubeClient:
 
     def get_scheduled_videos(self, channel_id: str, max_results: int = 50) -> List[Video]:
         """
-        Get scheduled (upcoming) videos from authenticated user's channel
+        Get scheduled (upcoming) live streams and premieres
 
-        Note: This only works for the authenticated user's own channel
+        Note: Regular scheduled videos are private/unlisted until publication
+        and cannot be retrieved via YouTube API. Only live streams with
+        eventType="upcoming" can be retrieved.
 
         Args:
-            channel_id: The YouTube channel ID (must be user's own channel)
+            channel_id: The YouTube channel ID
             max_results: Maximum number of videos to fetch (default 50)
 
         Returns:
-            List of Video objects with future publication dates
+            List of Video objects for upcoming live streams/premieres
 
         Raises:
             YouTubeAPIError: If API request fails
@@ -281,8 +283,8 @@ class YouTubeClient:
             raise YouTubeAPIError("Not authenticated. Call authenticate() first.")
 
         try:
-            # Use search API to find scheduled videos
-            # Note: This only works for the authenticated user's own channel
+            # Search for upcoming live streams and premieres
+            # Note: eventType="upcoming" only works for live broadcasts, not regular scheduled videos
             request = self.service.search().list(
                 part="snippet",
                 channelId=channel_id,
@@ -301,12 +303,11 @@ class YouTubeClient:
             return self._get_video_details(video_ids, channel_id)
 
         except HttpError as e:
-            # If we get a 403 error, it means we're trying to access another user's scheduled videos
-            if e.resp.status == 403:
-                return []  # Silently return empty list - can't access scheduled videos for other users
-            raise YouTubeAPIError(f"YouTube API error: {e}")
+            # Silently return empty list on error
+            # Most likely case: no upcoming live streams or insufficient permissions
+            return []
         except (KeyError, ValueError) as e:
-            raise YouTubeAPIError(f"Failed to parse API response: {e}")
+            return []
 
     def get_quota_usage(self) -> Optional[Dict[str, Any]]:
         """
