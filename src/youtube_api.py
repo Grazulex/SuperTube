@@ -261,6 +261,53 @@ class YouTubeClient:
 
         return videos
 
+    def get_scheduled_videos(self, channel_id: str, max_results: int = 50) -> List[Video]:
+        """
+        Get scheduled (upcoming) videos from authenticated user's channel
+
+        Note: This only works for the authenticated user's own channel
+
+        Args:
+            channel_id: The YouTube channel ID (must be user's own channel)
+            max_results: Maximum number of videos to fetch (default 50)
+
+        Returns:
+            List of Video objects with future publication dates
+
+        Raises:
+            YouTubeAPIError: If API request fails
+        """
+        if not self.service:
+            raise YouTubeAPIError("Not authenticated. Call authenticate() first.")
+
+        try:
+            # Use search API to find scheduled videos
+            # Note: This only works for the authenticated user's own channel
+            request = self.service.search().list(
+                part="snippet",
+                channelId=channel_id,
+                eventType="upcoming",
+                type="video",
+                maxResults=min(50, max_results)
+            )
+            response = request.execute()
+
+            video_ids = [item['id']['videoId'] for item in response.get('items', [])]
+
+            if not video_ids:
+                return []
+
+            # Get detailed info for scheduled videos
+            return self._get_video_details(video_ids, channel_id)
+
+        except HttpError as e:
+            # If we get a 403 error, it means we're trying to access another user's scheduled videos
+            if e.resp.status == 403:
+                return []  # Silently return empty list - can't access scheduled videos for other users
+            raise YouTubeAPIError(f"YouTube API error: {e}")
+        except (KeyError, ValueError) as e:
+            raise YouTubeAPIError(f"Failed to parse API response: {e}")
+
     def get_quota_usage(self) -> Optional[Dict[str, Any]]:
         """
         Get current API quota usage (if available)

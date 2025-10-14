@@ -172,6 +172,8 @@ class SuperTubeApp(App):
         Binding("r", "refresh", "Refresh", priority=True),
         Binding("?", "help", "Help"),
         Binding("d", "dashboard", "Dashboard"),
+        Binding("s", "cycle_sort", "Sort"),
+        Binding("t", "show_topflop", "Top/Flop"),
         Binding("enter", "select_channel", show=False),  # Hidden binding for non-DataTable views
         Binding("escape", "back", "Back"),
         # Vim-style navigation
@@ -181,12 +183,9 @@ class SuperTubeApp(App):
         Binding("1", "goto_channel_1", "Channel 1", show=False),
         Binding("2", "goto_channel_2", "Channel 2", show=False),
         Binding("3", "goto_channel_3", "Channel 3", show=False),
-        # Sort shortcut for video list
-        Binding("s", "cycle_sort", "Sort", show=False),
         # Video URL copy
         Binding("y", "copy_video_url", "Copy URL", show=False),
-        # Top/Flop analysis
-        Binding("t", "show_topflop", "Top/Flop", show=False),
+        # Top/Flop controls (shown in context)
         Binding("p", "cycle_period", "Period", show=False),
         Binding("m", "cycle_metric", "Metric", show=False),
         # Note: / is handled in on_key() method
@@ -293,11 +292,25 @@ class SuperTubeApp(App):
                         channel_config.channel_id
                     )
 
+                    # Get published videos
                     videos = await asyncio.to_thread(
                         self.youtube_client.get_channel_videos,
                         channel_config.channel_id,
                         self.config.settings.max_videos
                     )
+
+                    # Get scheduled videos (only works for authenticated user's channels)
+                    try:
+                        scheduled = await asyncio.to_thread(
+                            self.youtube_client.get_scheduled_videos,
+                            channel_config.channel_id,
+                            50
+                        )
+                        if scheduled:
+                            videos.extend(scheduled)
+                    except Exception:
+                        # Silently ignore if we can't get scheduled videos
+                        pass
 
                     # Detect changes before saving
                     changes = await self.db.detect_changes(channel_config.channel_id, channel, videos)
