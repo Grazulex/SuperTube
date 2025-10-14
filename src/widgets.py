@@ -548,16 +548,16 @@ class TopFlopWidget(Static):
         # Top videos table
         top_table = self.query_one("#top_videos_table", DataTable)
         if not top_table.columns:
-            top_table.add_column("🏆 Top Performers", key="title", width=40)
-            top_table.add_column("Growth", key="growth", width=15)
-            top_table.add_column("Current", key="current", width=15)
+            top_table.add_column("🏆 Top Performers", key="title", width=25)
+            top_table.add_column("Growth", key="growth", width=10)
+            top_table.add_column("Current", key="current", width=10)
 
         # Bottom videos table
         bottom_table = self.query_one("#bottom_videos_table", DataTable)
         if not bottom_table.columns:
-            bottom_table.add_column("📉 Bottom Performers", key="title", width=40)
-            bottom_table.add_column("Growth", key="growth", width=15)
-            bottom_table.add_column("Current", key="current", width=15)
+            bottom_table.add_column("📉 Bottom Performers", key="title", width=25)
+            bottom_table.add_column("Growth", key="growth", width=10)
+            bottom_table.add_column("Current", key="current", width=10)
 
     def update_data(
         self,
@@ -599,6 +599,13 @@ class TopFlopWidget(Static):
     def _update_top_table(self, videos: List[tuple[Video, float]]) -> None:
         """Update top performers table"""
         table = self.query_one("#top_videos_table", DataTable)
+
+        # Ensure columns exist (in case on_mount wasn't called due to display=False)
+        if not table.columns:
+            table.add_column("🏆 Top Performers", key="title", width=25)
+            table.add_column("Growth", key="growth", width=10)
+            table.add_column("Current", key="current", width=10)
+
         table.clear(columns=False)
 
         if not videos:
@@ -627,14 +634,21 @@ class TopFlopWidget(Static):
                 eng_rate = video.engagement_rate
                 current = f"[magenta]{eng_rate:.2f}%[/magenta]"
 
-            # Truncate title
-            title = video.title[:37] + "..." if len(video.title) > 40 else video.title
+            # Truncate title to fit in 25-char column
+            title = video.title[:22] + "..." if len(video.title) > 25 else video.title
 
             table.add_row(title, growth_str, current, key=video.id)
 
     def _update_bottom_table(self, videos: List[tuple[Video, float]]) -> None:
         """Update bottom performers table"""
         table = self.query_one("#bottom_videos_table", DataTable)
+
+        # Ensure columns exist (in case on_mount wasn't called due to display=False)
+        if not table.columns:
+            table.add_column("📉 Bottom Performers", key="title", width=25)
+            table.add_column("Growth", key="growth", width=10)
+            table.add_column("Current", key="current", width=10)
+
         table.clear(columns=False)
 
         if not videos:
@@ -663,8 +677,8 @@ class TopFlopWidget(Static):
                 eng_rate = video.engagement_rate
                 current = f"[magenta]{eng_rate:.2f}%[/magenta]"
 
-            # Truncate title
-            title = video.title[:37] + "..." if len(video.title) > 40 else video.title
+            # Truncate title to fit in 25-char column
+            title = video.title[:22] + "..." if len(video.title) > 25 else video.title
 
             table.add_row(title, growth_str, current, key=video.id)
 
@@ -934,7 +948,14 @@ class MainViewPanel(Static):
     def compose(self) -> ComposeResult:
         """Create child widgets"""
         with Vertical():
+            # Dashboard content (visible in dashboard mode)
             yield Static(id="main_view_content", classes="main-view-content")
+            # Top/Flop widget (visible in topflop mode)
+            yield TopFlopWidget(id="topflop_widget")
+
+    def on_mount(self) -> None:
+        """Initialize widget visibility based on mode"""
+        self._update_visibility()
 
     def update_mode(self, mode: str) -> None:
         """Switch between different view modes"""
@@ -947,15 +968,32 @@ class MainViewPanel(Static):
         self.channel_history = history
         self.refresh_view()
 
+    def _update_visibility(self) -> None:
+        """Show/hide widgets based on current mode"""
+        try:
+            content = self.query_one("#main_view_content", Static)
+            topflop = self.query_one("#topflop_widget", TopFlopWidget)
+
+            if self.current_mode == "dashboard":
+                content.display = True
+                topflop.display = False
+            elif self.current_mode == "topflop":
+                content.display = False
+                topflop.display = True
+        except:
+            pass
+
     def refresh_view(self) -> None:
         """Refresh the main view based on current mode and context"""
-        content = self.query_one("#main_view_content", Static)
+        self._update_visibility()
 
         if self.current_mode == "dashboard":
+            content = self.query_one("#main_view_content", Static)
             self._show_dashboard_view(content)
         elif self.current_mode == "topflop":
-            self._show_topflop_view(content)
+            self._show_topflop_view()
         else:
+            content = self.query_one("#main_view_content", Static)
             content.update(f"[dim]Mode: {self.current_mode}[/dim]")
 
     def _show_dashboard_view(self, content: Static) -> None:
@@ -1057,10 +1095,21 @@ Change: [{views_color}]{views_sign}{views_change:,}[/{views_color}] ([{views_col
 
 [dim]Tip: More data points will show graphs[/dim]"""
 
-    def _show_topflop_view(self, content: Static) -> None:
-        """Show Top/Flop placeholder"""
-        content.update(
-            "[bold cyan]📈 Top/Flop Analysis[/bold cyan]\n\n"
-            "[yellow]Top/Flop widget will be integrated here[/yellow]\n"
-            "[dim]Press 'd' to return to dashboard[/dim]"
-        )
+    def _show_topflop_view(self) -> None:
+        """Show Top/Flop widget with data"""
+        try:
+            topflop = self.query_one("#topflop_widget", TopFlopWidget)
+
+            # Trigger data loading from app if we have a channel selected
+            if self.current_channel and hasattr(self.app, 'load_topflop_data'):
+                self.app.load_topflop_data(self.current_channel.id, topflop)
+            else:
+                # No channel selected - show placeholder
+                topflop.query_one("#topflop_title", Static).update(
+                    "[bold cyan]📈 Top/Flop Analysis[/bold cyan]"
+                )
+                topflop.query_one("#topflop_controls", Static).update(
+                    "[yellow]Select a channel to view Top/Flop analysis[/yellow]"
+                )
+        except Exception:
+            pass
