@@ -218,34 +218,23 @@ class DatabaseManager:
 
     async def has_stats_for_today(self, channel_id: str) -> bool:
         """
-        Check if we already have stats for today for a given channel (based on local calendar day)
+        Check if we already have stats collected in the last 12 hours for a given channel
 
         Args:
             channel_id: YouTube channel ID
 
         Returns:
-            True if stats exist for today, False otherwise
+            True if stats exist within last 12 hours, False otherwise
         """
-        # Get today's start/end in local time
-        local_today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-        local_today_end = local_today_start + timedelta(days=1)
-
-        # Convert to UTC for comparison with DB timestamps (which are in UTC)
-        # Calculate UTC offset
-        utc_now = datetime.utcnow()
-        local_now = datetime.now()
-        utc_offset = local_now - utc_now
-
-        # Convert local times to UTC
-        utc_today_start = local_today_start - utc_offset
-        utc_today_end = local_today_end - utc_offset
+        # Check if we have stats from the last 12 hours
+        twelve_hours_ago = datetime.utcnow() - timedelta(hours=12)
 
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute("""
                 SELECT COUNT(*) as count FROM stats_history
-                WHERE channel_id = ? AND timestamp >= ? AND timestamp < ?
-            """, (channel_id, utc_today_start.isoformat(), utc_today_end.isoformat())) as cursor:
+                WHERE channel_id = ? AND timestamp >= ?
+            """, (channel_id, twelve_hours_ago.isoformat())) as cursor:
                 row = await cursor.fetchone()
                 return row['count'] > 0 if row else False
 
@@ -315,23 +304,62 @@ class DatabaseManager:
 
     async def save_channel_stats(self, channel: Channel) -> None:
         """
-        Save a snapshot of channel statistics to history
+        Save or update a snapshot of channel statistics to history.
+        If an entry exists for today (same calendar day), update it instead of creating a new one.
 
         Args:
             channel: Channel object with current stats
         """
         async with aiosqlite.connect(self.db_path) as db:
-            await db.execute("""
-                INSERT INTO stats_history
-                (channel_id, timestamp, subscriber_count, view_count, video_count)
-                VALUES (?, ?, ?, ?, ?)
-            """, (
-                channel.id,
-                datetime.utcnow().isoformat(),
-                channel.subscriber_count,
-                channel.view_count,
-                channel.video_count
-            ))
+            db.row_factory = aiosqlite.Row
+
+            # Get today's start/end in local time
+            local_today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            local_today_end = local_today_start + timedelta(days=1)
+
+            # Convert to UTC for comparison with DB timestamps
+            utc_now = datetime.utcnow()
+            local_now = datetime.now()
+            utc_offset = local_now - utc_now
+
+            utc_today_start = local_today_start - utc_offset
+            utc_today_end = local_today_end - utc_offset
+
+            # Check if entry exists for today
+            async with db.execute("""
+                SELECT id FROM stats_history
+                WHERE channel_id = ? AND timestamp >= ? AND timestamp < ?
+                ORDER BY timestamp DESC LIMIT 1
+            """, (channel.id, utc_today_start.isoformat(), utc_today_end.isoformat())) as cursor:
+                existing = await cursor.fetchone()
+
+            if existing:
+                # Update existing entry for today
+                await db.execute("""
+                    UPDATE stats_history
+                    SET timestamp = ?, subscriber_count = ?, view_count = ?, video_count = ?
+                    WHERE id = ?
+                """, (
+                    datetime.utcnow().isoformat(),
+                    channel.subscriber_count,
+                    channel.view_count,
+                    channel.video_count,
+                    existing['id']
+                ))
+            else:
+                # Insert new entry
+                await db.execute("""
+                    INSERT INTO stats_history
+                    (channel_id, timestamp, subscriber_count, view_count, video_count)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (
+                    channel.id,
+                    datetime.utcnow().isoformat(),
+                    channel.subscriber_count,
+                    channel.view_count,
+                    channel.video_count
+                ))
+
             await db.commit()
 
     async def get_channel_history(self, channel_id: str, days: int = 30) -> List[ChannelStats]:
@@ -388,25 +416,64 @@ class DatabaseManager:
 
     async def save_video_stats(self, videos: List[Video]) -> None:
         """
-        Save snapshots of video statistics to history
+        Save or update snapshots of video statistics to history.
+        If an entry exists for today (same calendar day), update it instead of creating a new one.
 
         Args:
             videos: List of Video objects with current stats
         """
         async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
             timestamp = datetime.utcnow().isoformat()
+
+            # Get today's start/end in local time
+            local_today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            local_today_end = local_today_start + timedelta(days=1)
+
+            # Convert to UTC for comparison with DB timestamps
+            utc_now = datetime.utcnow()
+            local_now = datetime.now()
+            utc_offset = local_now - utc_now
+
+            utc_today_start = local_today_start - utc_offset
+            utc_today_end = local_today_end - utc_offset
+
             for video in videos:
-                await db.execute("""
-                    INSERT INTO video_stats_history
-                    (video_id, timestamp, view_count, like_count, comment_count)
-                    VALUES (?, ?, ?, ?, ?)
-                """, (
-                    video.id,
-                    timestamp,
-                    video.view_count,
-                    video.like_count,
-                    video.comment_count
-                ))
+                # Check if entry exists for today
+                async with db.execute("""
+                    SELECT id FROM video_stats_history
+                    WHERE video_id = ? AND timestamp >= ? AND timestamp < ?
+                    ORDER BY timestamp DESC LIMIT 1
+                """, (video.id, utc_today_start.isoformat(), utc_today_end.isoformat())) as cursor:
+                    existing = await cursor.fetchone()
+
+                if existing:
+                    # Update existing entry for today
+                    await db.execute("""
+                        UPDATE video_stats_history
+                        SET timestamp = ?, view_count = ?, like_count = ?, comment_count = ?
+                        WHERE id = ?
+                    """, (
+                        timestamp,
+                        video.view_count,
+                        video.like_count,
+                        video.comment_count,
+                        existing['id']
+                    ))
+                else:
+                    # Insert new entry
+                    await db.execute("""
+                        INSERT INTO video_stats_history
+                        (video_id, timestamp, view_count, like_count, comment_count)
+                        VALUES (?, ?, ?, ?, ?)
+                    """, (
+                        video.id,
+                        timestamp,
+                        video.view_count,
+                        video.like_count,
+                        video.comment_count
+                    ))
+
             await db.commit()
 
     async def get_video_history(self, video_id: str, days: int = 30) -> List[VideoStats]:
