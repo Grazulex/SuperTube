@@ -640,6 +640,10 @@ class SuperTubeApp(App):
   ?          - Show this help
   ESC        - Back to previous screen
 
+[bold]🔄 Auto-Refresh Controls:[/bold]
+  Shift+A    - Toggle auto-refresh on/off
+  Shift+W    - Toggle watch mode for selected channel (refresh every 5min)
+
 [bold]Panel Layout:[/bold]
   Left panels show: Channels → Videos → Video Details
   Right panel shows: Channel stats, Top/Flop analysis, Temporal analysis
