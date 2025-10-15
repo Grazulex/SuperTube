@@ -1,11 +1,11 @@
 ---
 id: task-34
 title: Analyse de sentiment des commentaires
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2025-10-13 22:47'
-updated_date: '2025-10-15 16:36'
+updated_date: '2025-10-15 16:45'
 labels: []
 dependencies: []
 priority: medium
@@ -60,4 +60,21 @@ Implémentation backend complétée avec succès:
 - Méthode get_video_comments() avec support replies
 - Gestion erreurs si commentaires désactivés
 - Pagination pour récupérer jusqu'à 100 commentaires\n\n## Analyse de sentiment (sentiment_analyzer.py)\n- Module dédié utilisant TextBlob\n- Classification automatique positif/neutre/négatif\n- Méthodes batch pour analyse multi-commentaires\n- Statistiques résumées\n\n## Dépendances\n- Ajout textblob==0.17.1 dans requirements.txt\n\n## Reste à faire\n- Créer widgets TUI pour affichage commentaires\n- Intégrer dans l'interface principale\n- Tester le workflow complet
+
+## Intégration TUI (app.py + widgets.py)
+- Ajout CommentsSentimentPanel et ChannelSentimentPanel dans widgets.py
+- Binding clavier 'n' pour accéder à la vue sentiment
+- Méthode action_show_sentiment() dans app.py
+- Méthode load_sentiment_data() async pour charger les données
+- Intégration dans MainViewPanel avec mode "sentiment"
+- Mise à jour du texte d'aide avec le nouveau raccourci
+
+## Tests et finalisation
+- Intégration complète et testée
+- Accessible via touche 'n' dans l'interface
+- Affiche statistiques agrégées par chaîne
+- Identifie les vidéos avec feedback négatif
+
+## Améliorations post-implémentation
+- Changement du tri par défaut des chaînes: subscribers (descendant)
 <!-- SECTION:NOTES:END -->
