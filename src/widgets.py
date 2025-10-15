@@ -697,8 +697,8 @@ class ChannelsListPanel(Static):
         super().__init__(**kwargs)
         self.channels: List[Channel] = []
         self.can_focus = True
-        self.sort_key = "name"  # Default sort by name
-        self.sort_reverse = False  # Ascending by default
+        self.sort_key = "subs"  # Default sort by subscribers
+        self.sort_reverse = True  # Descending by default (most subs first)
 
     def compose(self) -> ComposeResult:
         """Create child widgets"""
