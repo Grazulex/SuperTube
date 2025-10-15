@@ -7,7 +7,7 @@ from pathlib import Path
 
 import aiosqlite
 
-from .models import Channel, Video, ChannelStats, VideoStats, ChangeDetection, Alert
+from .models import Channel, Video, ChannelStats, VideoStats, ChangeDetection, Alert, Comment, VideoSentiment, ChannelSentiment
 
 
 class DatabaseManager:
@@ -132,6 +132,34 @@ class DatabaseManager:
             await db.execute("""
                 CREATE INDEX IF NOT EXISTS idx_alerts_acknowledged
                 ON alerts(acknowledged, triggered_at)
+            """)
+
+            # Comments table
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS comments (
+                    id TEXT PRIMARY KEY,
+                    video_id TEXT NOT NULL,
+                    author TEXT NOT NULL,
+                    text TEXT NOT NULL,
+                    like_count INTEGER DEFAULT 0,
+                    published_at TEXT NOT NULL,
+                    parent_id TEXT,
+                    sentiment_score REAL,
+                    sentiment_label TEXT,
+                    last_updated TEXT NOT NULL,
+                    FOREIGN KEY (video_id) REFERENCES videos(id),
+                    FOREIGN KEY (parent_id) REFERENCES comments(id)
+                )
+            """)
+
+            await db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_comments_video
+                ON comments(video_id, published_at DESC)
+            """)
+
+            await db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_comments_sentiment
+                ON comments(video_id, sentiment_label)
             """)
 
             await db.commit()
@@ -892,3 +920,194 @@ class DatabaseManager:
             """, (cutoff.isoformat(),))
             await db.commit()
             return cursor.rowcount
+
+    async def save_comments(self, comments: List[Comment]) -> None:
+        """
+        Save or update multiple comments
+
+        Args:
+            comments: List of Comment objects to save
+        """
+        async with aiosqlite.connect(self.db_path) as db:
+            for comment in comments:
+                await db.execute("""
+                    INSERT OR REPLACE INTO comments
+                    (id, video_id, author, text, like_count, published_at,
+                     parent_id, sentiment_score, sentiment_label, last_updated)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    comment.id,
+                    comment.video_id,
+                    comment.author,
+                    comment.text,
+                    comment.like_count,
+                    comment.published_at.isoformat(),
+                    comment.parent_id,
+                    comment.sentiment_score,
+                    comment.sentiment_label,
+                    datetime.utcnow().isoformat()
+                ))
+            await db.commit()
+
+    async def get_video_comments(self, video_id: str, limit: int = 100) -> List[Comment]:
+        """
+        Get comments for a video from cache
+
+        Args:
+            video_id: YouTube video ID
+            limit: Maximum number of comments to return
+
+        Returns:
+            List of Comment objects, ordered by published date (newest first)
+        """
+        comments = []
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("""
+                SELECT * FROM comments
+                WHERE video_id = ?
+                ORDER BY published_at DESC
+                LIMIT ?
+            """, (video_id, limit)) as cursor:
+                async for row in cursor:
+                    comments.append(Comment(
+                        id=row['id'],
+                        video_id=row['video_id'],
+                        author=row['author'],
+                        text=row['text'],
+                        like_count=row['like_count'],
+                        published_at=datetime.fromisoformat(row['published_at']),
+                        parent_id=row['parent_id'],
+                        sentiment_score=row['sentiment_score'],
+                        sentiment_label=row['sentiment_label']
+                    ))
+        return comments
+
+    async def get_video_sentiment(self, video_id: str) -> Optional[VideoSentiment]:
+        """
+        Get aggregated sentiment statistics for a video
+
+        Args:
+            video_id: YouTube video ID
+
+        Returns:
+            VideoSentiment object if comments exist, None otherwise
+        """
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+
+            # Get sentiment counts
+            async with db.execute("""
+                SELECT
+                    COUNT(*) as total,
+                    SUM(CASE WHEN sentiment_label = 'positive' THEN 1 ELSE 0 END) as positive,
+                    SUM(CASE WHEN sentiment_label = 'neutral' THEN 1 ELSE 0 END) as neutral,
+                    SUM(CASE WHEN sentiment_label = 'negative' THEN 1 ELSE 0 END) as negative,
+                    AVG(sentiment_score) as avg_sentiment
+                FROM comments
+                WHERE video_id = ? AND sentiment_score IS NOT NULL
+            """, (video_id,)) as cursor:
+                row = await cursor.fetchone()
+
+                if not row or row['total'] == 0:
+                    return None
+
+                # Get top keywords (simple word frequency)
+                async with db.execute("""
+                    SELECT text FROM comments
+                    WHERE video_id = ? AND sentiment_label IS NOT NULL
+                    LIMIT 100
+                """, (video_id,)) as text_cursor:
+                    word_freq = {}
+                    async for text_row in text_cursor:
+                        words = text_row['text'].lower().split()
+                        for word in words:
+                            # Filter out short words and common stop words
+                            if len(word) > 3 and word not in ['this', 'that', 'with', 'from', 'have', 'been', 'were']:
+                                word_freq[word] = word_freq.get(word, 0) + 1
+
+                    # Get top 5 keywords
+                    top_keywords = sorted(word_freq.items(), key=lambda x: x[1], reverse=True)[:5]
+
+                return VideoSentiment(
+                    video_id=video_id,
+                    total_comments=row['total'],
+                    positive_count=row['positive'] or 0,
+                    neutral_count=row['neutral'] or 0,
+                    negative_count=row['negative'] or 0,
+                    avg_sentiment=row['avg_sentiment'] or 0.0,
+                    top_keywords=top_keywords
+                )
+
+    async def get_channel_sentiment(self, channel_id: str, limit_videos: int = 20) -> Optional[ChannelSentiment]:
+        """
+        Get aggregated sentiment statistics for a channel
+
+        Args:
+            channel_id: YouTube channel ID
+            limit_videos: Number of recent videos to analyze
+
+        Returns:
+            ChannelSentiment object if comments exist, None otherwise
+        """
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+
+            # Get recent videos for this channel
+            async with db.execute("""
+                SELECT id FROM videos
+                WHERE channel_id = ?
+                ORDER BY published_at DESC
+                LIMIT ?
+            """, (channel_id, limit_videos)) as cursor:
+                video_ids = [row['id'] async for row in cursor]
+
+            if not video_ids:
+                return None
+
+            # Get sentiment counts across all videos
+            placeholders = ','.join('?' * len(video_ids))
+            async with db.execute(f"""
+                SELECT
+                    COUNT(*) as total,
+                    SUM(CASE WHEN sentiment_label = 'positive' THEN 1 ELSE 0 END) as positive,
+                    SUM(CASE WHEN sentiment_label = 'neutral' THEN 1 ELSE 0 END) as neutral,
+                    SUM(CASE WHEN sentiment_label = 'negative' THEN 1 ELSE 0 END) as negative,
+                    AVG(sentiment_score) as avg_sentiment
+                FROM comments
+                WHERE video_id IN ({placeholders}) AND sentiment_score IS NOT NULL
+            """, video_ids) as cursor:
+                row = await cursor.fetchone()
+
+                if not row or row['total'] == 0:
+                    return None
+
+                # Find videos with high negative feedback (>40% negative)
+                videos_with_negative = []
+                for vid_id in video_ids:
+                    async with db.execute("""
+                        SELECT
+                            COUNT(*) as total,
+                            SUM(CASE WHEN sentiment_label = 'negative' THEN 1 ELSE 0 END) as negative
+                        FROM comments
+                        WHERE video_id = ? AND sentiment_label IS NOT NULL
+                    """, (vid_id,)) as vid_cursor:
+                        vid_row = await vid_cursor.fetchone()
+                        if vid_row and vid_row['total'] > 0:
+                            negative_percent = (vid_row['negative'] / vid_row['total']) * 100
+                            if negative_percent > 40:
+                                videos_with_negative.append((vid_id, negative_percent))
+
+                # Sort by negative percentage
+                videos_with_negative.sort(key=lambda x: x[1], reverse=True)
+
+                return ChannelSentiment(
+                    channel_id=channel_id,
+                    total_comments=row['total'],
+                    positive_count=row['positive'] or 0,
+                    neutral_count=row['neutral'] or 0,
+                    negative_count=row['negative'] or 0,
+                    avg_sentiment=row['avg_sentiment'] or 0.0,
+                    videos_analyzed=len(video_ids),
+                    videos_with_negative_feedback=videos_with_negative[:5]  # Top 5
+                )

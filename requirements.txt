@@ -17,3 +17,6 @@ python-dateutil==2.8.2
 
 # Graphiques et visualisation
 plotext==5.2.8  # Graphiques dans le terminal
+
+# Sentiment Analysis
+textblob==0.17.1  # Analyse de sentiment des commentaires

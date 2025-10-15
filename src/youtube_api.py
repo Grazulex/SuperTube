@@ -12,7 +12,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-from .models import Channel, Video
+from .models import Channel, Video, Comment
 
 
 # Scopes required for YouTube Data API
@@ -313,3 +313,94 @@ class YouTubeClient:
         # Quota is managed in Google Cloud Console
         # Each request costs different units (e.g., list=1, search=100)
         return None
+
+    def get_video_comments(self, video_id: str, max_results: int = 100) -> List[Comment]:
+        """
+        Get comments for a YouTube video
+
+        Args:
+            video_id: The YouTube video ID
+            max_results: Maximum number of comments to fetch (default 100)
+
+        Returns:
+            List of Comment objects
+
+        Raises:
+            YouTubeAPIError: If API request fails
+        """
+        if not self.service:
+            raise YouTubeAPIError("Not authenticated. Call authenticate() first.")
+
+        try:
+            comments = []
+            next_page_token = None
+
+            while len(comments) < max_results:
+                request = self.service.commentThreads().list(
+                    part="snippet",
+                    videoId=video_id,
+                    maxResults=min(100, max_results - len(comments)),
+                    pageToken=next_page_token,
+                    textFormat="plainText"
+                )
+                response = request.execute()
+
+                for item in response.get('items', []):
+                    # Get top-level comment
+                    top_comment = item['snippet']['topLevelComment']['snippet']
+
+                    comments.append(Comment(
+                        id=item['snippet']['topLevelComment']['id'],
+                        video_id=video_id,
+                        author=top_comment['authorDisplayName'],
+                        text=top_comment['textDisplay'],
+                        like_count=top_comment.get('likeCount', 0),
+                        published_at=datetime.fromisoformat(top_comment['publishedAt'].replace('Z', '+00:00')),
+                        parent_id=None
+                    ))
+
+                    # Get replies if any
+                    if item['snippet'].get('totalReplyCount', 0) > 0 and len(comments) < max_results:
+                        try:
+                            replies_request = self.service.comments().list(
+                                part="snippet",
+                                parentId=item['snippet']['topLevelComment']['id'],
+                                maxResults=min(20, max_results - len(comments)),
+                                textFormat="plainText"
+                            )
+                            replies_response = replies_request.execute()
+
+                            for reply_item in replies_response.get('items', []):
+                                reply_snippet = reply_item['snippet']
+                                comments.append(Comment(
+                                    id=reply_item['id'],
+                                    video_id=video_id,
+                                    author=reply_snippet['authorDisplayName'],
+                                    text=reply_snippet['textDisplay'],
+                                    like_count=reply_snippet.get('likeCount', 0),
+                                    published_at=datetime.fromisoformat(reply_snippet['publishedAt'].replace('Z', '+00:00')),
+                                    parent_id=item['snippet']['topLevelComment']['id']
+                                ))
+
+                                if len(comments) >= max_results:
+                                    break
+                        except HttpError:
+                            # Some replies might be unavailable, skip them
+                            pass
+
+                    if len(comments) >= max_results:
+                        break
+
+                next_page_token = response.get('nextPageToken')
+                if not next_page_token:
+                    break
+
+            return comments
+
+        except HttpError as e:
+            # Comments might be disabled for the video
+            if e.resp.status == 403:
+                return []  # Return empty list if comments are disabled
+            raise YouTubeAPIError(f"YouTube API error: {e}")
+        except (KeyError, ValueError) as e:
+            raise YouTubeAPIError(f"Failed to parse API response: {e}")

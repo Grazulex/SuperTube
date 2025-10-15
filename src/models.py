@@ -653,3 +653,125 @@ class MilestoneProjection:
             return f"{self.threshold:,} {self.metric}: {self.estimated_date.strftime('%Y-%m-%d')} ({self.days_until} days)"
         else:
             return f"{self.threshold:,} {self.metric}: Unknown"
+
+
+@dataclass
+class Comment:
+    """YouTube comment information"""
+    id: str
+    video_id: str
+    author: str
+    text: str
+    like_count: int
+    published_at: datetime
+    parent_id: Optional[str] = None  # For replies
+    sentiment_score: Optional[float] = None  # -1.0 to 1.0 (negative to positive)
+    sentiment_label: Optional[str] = None  # "positive", "neutral", "negative"
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for serialization"""
+        data = asdict(self)
+        data['published_at'] = self.published_at.isoformat()
+        return data
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'Comment':
+        """Create from dictionary"""
+        if isinstance(data['published_at'], str):
+            data['published_at'] = datetime.fromisoformat(data['published_at'])
+        return cls(**data)
+
+
+@dataclass
+class VideoSentiment:
+    """Aggregated sentiment statistics for a video"""
+    video_id: str
+    total_comments: int
+    positive_count: int
+    neutral_count: int
+    negative_count: int
+    avg_sentiment: float  # Average sentiment score (-1.0 to 1.0)
+    top_keywords: List[tuple[str, int]]  # (keyword, frequency) tuples
+
+    @property
+    def positive_percent(self) -> float:
+        """Percentage of positive comments"""
+        if self.total_comments == 0:
+            return 0.0
+        return (self.positive_count / self.total_comments) * 100
+
+    @property
+    def neutral_percent(self) -> float:
+        """Percentage of neutral comments"""
+        if self.total_comments == 0:
+            return 0.0
+        return (self.neutral_count / self.total_comments) * 100
+
+    @property
+    def negative_percent(self) -> float:
+        """Percentage of negative comments"""
+        if self.total_comments == 0:
+            return 0.0
+        return (self.negative_count / self.total_comments) * 100
+
+    @property
+    def sentiment_label(self) -> str:
+        """Overall sentiment label for the video"""
+        if self.avg_sentiment > 0.1:
+            return "positive"
+        elif self.avg_sentiment < -0.1:
+            return "negative"
+        else:
+            return "neutral"
+
+    def get_summary(self) -> str:
+        """Get human-readable summary"""
+        return f"{self.total_comments} comments | {self.positive_percent:.1f}% pos, {self.negative_percent:.1f}% neg | Avg: {self.avg_sentiment:+.2f}"
+
+
+@dataclass
+class ChannelSentiment:
+    """Aggregated sentiment statistics for a channel"""
+    channel_id: str
+    total_comments: int
+    positive_count: int
+    neutral_count: int
+    negative_count: int
+    avg_sentiment: float
+    videos_analyzed: int
+    videos_with_negative_feedback: List[tuple[str, float]]  # (video_id, negative_percent) tuples
+
+    @property
+    def positive_percent(self) -> float:
+        """Percentage of positive comments"""
+        if self.total_comments == 0:
+            return 0.0
+        return (self.positive_count / self.total_comments) * 100
+
+    @property
+    def neutral_percent(self) -> float:
+        """Percentage of neutral comments"""
+        if self.total_comments == 0:
+            return 0.0
+        return (self.neutral_count / self.total_comments) * 100
+
+    @property
+    def negative_percent(self) -> float:
+        """Percentage of negative comments"""
+        if self.total_comments == 0:
+            return 0.0
+        return (self.negative_count / self.total_comments) * 100
+
+    @property
+    def sentiment_label(self) -> str:
+        """Overall sentiment label for the channel"""
+        if self.avg_sentiment > 0.1:
+            return "positive"
+        elif self.avg_sentiment < -0.1:
+            return "negative"
+        else:
+            return "neutral"
+
+    def get_summary(self) -> str:
+        """Get human-readable summary"""
+        return f"{self.total_comments} comments across {self.videos_analyzed} videos | {self.positive_percent:.1f}% pos, {self.negative_percent:.1f}% neg"
