@@ -996,7 +996,7 @@ class MainViewPanel(Static):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.current_mode = "dashboard"  # "dashboard", "topflop", "temporal", "comparison", "titletag", "projection"
+        self.current_mode = "dashboard"  # "dashboard", "topflop", "temporal", "comparison", "titletag", "projection", "sentiment"
         self.current_channel: Optional[Channel] = None
         self.channel_history: Optional[List] = None
 
@@ -1015,6 +1015,8 @@ class MainViewPanel(Static):
             yield TitleTagAnalysisPanel(id="titletag_panel")
             # Growth Projection panel (visible in projection mode)
             yield GrowthProjectionPanel(id="projection_panel")
+            # Channel Sentiment panel (visible in sentiment mode)
+            yield ChannelSentimentPanel(id="sentiment_panel")
 
     def on_mount(self) -> None:
         """Initialize widget visibility based on mode"""
@@ -1040,6 +1042,7 @@ class MainViewPanel(Static):
             comparison = self.query_one("#comparison_panel", ChannelComparisonPanel)
             titletag = self.query_one("#titletag_panel", TitleTagAnalysisPanel)
             projection = self.query_one("#projection_panel", GrowthProjectionPanel)
+            sentiment = self.query_one("#sentiment_panel", ChannelSentimentPanel)
 
             if self.current_mode == "dashboard":
                 content.display = True
@@ -1048,6 +1051,7 @@ class MainViewPanel(Static):
                 comparison.display = False
                 titletag.display = False
                 projection.display = False
+                sentiment.display = False
             elif self.current_mode == "topflop":
                 content.display = False
                 topflop.display = True
@@ -1055,6 +1059,7 @@ class MainViewPanel(Static):
                 comparison.display = False
                 titletag.display = False
                 projection.display = False
+                sentiment.display = False
             elif self.current_mode == "temporal":
                 content.display = False
                 topflop.display = False
@@ -1062,6 +1067,7 @@ class MainViewPanel(Static):
                 comparison.display = False
                 titletag.display = False
                 projection.display = False
+                sentiment.display = False
             elif self.current_mode == "comparison":
                 content.display = False
                 topflop.display = False
@@ -1069,6 +1075,7 @@ class MainViewPanel(Static):
                 comparison.display = True
                 titletag.display = False
                 projection.display = False
+                sentiment.display = False
             elif self.current_mode == "titletag":
                 content.display = False
                 topflop.display = False
@@ -1076,6 +1083,7 @@ class MainViewPanel(Static):
                 comparison.display = False
                 titletag.display = True
                 projection.display = False
+                sentiment.display = False
             elif self.current_mode == "projection":
                 content.display = False
                 topflop.display = False
@@ -1083,6 +1091,15 @@ class MainViewPanel(Static):
                 comparison.display = False
                 titletag.display = False
                 projection.display = True
+                sentiment.display = False
+            elif self.current_mode == "sentiment":
+                content.display = False
+                topflop.display = False
+                temporal.display = False
+                comparison.display = False
+                titletag.display = False
+                projection.display = False
+                sentiment.display = True
         except:
             pass
 
@@ -1103,6 +1120,8 @@ class MainViewPanel(Static):
             self._show_titletag_view()
         elif self.current_mode == "projection":
             self._show_projection_view()
+        elif self.current_mode == "sentiment":
+            self._show_sentiment_view()
         else:
             content = self.query_one("#main_view_content", Static)
             content.update(f"[dim]Mode: {self.current_mode}[/dim]")
@@ -1285,6 +1304,22 @@ Change: [{views_color}]{views_sign}{views_change:,}[/{views_color}] ([{views_col
                 # No channel selected - show placeholder
                 projection.query_one("#projection_content", Static).update(
                     "[yellow]Select a channel to view growth projections[/yellow]"
+                )
+        except Exception:
+            pass
+
+    def _show_sentiment_view(self) -> None:
+        """Show Comment Sentiment Analysis panel with data"""
+        try:
+            sentiment = self.query_one("#sentiment_panel", ChannelSentimentPanel)
+
+            # Trigger data loading from app if we have a channel selected
+            if self.current_channel and hasattr(self.app, 'load_sentiment_data'):
+                self.app.load_sentiment_data(self.current_channel.id, sentiment)
+            else:
+                # No channel selected - show placeholder
+                sentiment.query_one("#channel_sentiment_content", Static).update(
+                    "[yellow]Select a channel to view sentiment analysis[/yellow]"
                 )
         except Exception:
             pass

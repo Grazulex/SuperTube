@@ -19,7 +19,7 @@ from .widgets import (
     DashboardWidget, ChannelDetailWidget, VideoListWidget, TopFlopWidget,
     ChannelsListPanel, VideosListPanel, VideoDetailsPanel, MainViewPanel,
     TemporalAnalysisPanel, ChannelComparisonPanel, TitleTagAnalysisPanel,
-    GrowthProjectionPanel
+    GrowthProjectionPanel, CommentsSentimentPanel, ChannelSentimentPanel
 )
 from .alerts import AlertManager
 from .temporal_analysis import TemporalAnalyzer
@@ -231,6 +231,7 @@ class SuperTubeApp(App):
         Binding("c", "show_comparison", "Compare"),
         Binding("w", "show_titletag", "Title/Tags"),
         Binding("g", "show_projection", "Growth"),
+        Binding("n", "show_sentiment", "Sentiment"),
         Binding("f", "cycle_filter", "Filter"),
         Binding("escape", "back", "Back"),
         # Vim-style navigation
@@ -562,6 +563,10 @@ class SuperTubeApp(App):
   d          - Show Dashboard view in main panel
   t          - Show Top/Flop analysis in main view
   a          - Show Temporal Analysis in main view
+  c          - Show Channel Comparison in main view
+  w          - Show Title/Tag Analysis in main view
+  g          - Show Growth Projections in main view
+  n          - Show Comment Sentiment Analysis in main view
   f          - Cycle video filters (all → recent → popular → viral → high engagement)
   y          - Show video URL (when video selected)
 
@@ -889,6 +894,18 @@ class SuperTubeApp(App):
             main_panel = self.query_one("#main_view_panel", MainViewPanel)
             main_panel.update_mode("projection")
             self.status_bar.set_status("Showing Growth Projections - Future growth predictions")
+        except Exception as e:
+            self.status_bar.set_status(f"Error: {e}")
+
+    def action_show_sentiment(self) -> None:
+        """Show Comment Sentiment Analysis in main panel"""
+        if self.current_view != "dashboard":
+            return
+
+        try:
+            main_panel = self.query_one("#main_view_panel", MainViewPanel)
+            main_panel.update_mode("sentiment")
+            self.status_bar.set_status("Showing Comment Sentiment Analysis")
         except Exception as e:
             self.status_bar.set_status(f"Error: {e}")
 
@@ -1445,6 +1462,30 @@ class SuperTubeApp(App):
                 subscriber_projection,
                 view_projection,
                 sub_milestones
+            )
+        except Exception as e:
+            # Silently fail
+            pass
+
+    @work(exclusive=False)
+    async def load_sentiment_data(self, channel_id: str, widget) -> None:
+        """Load and display sentiment analysis for channel"""
+        if not self.db:
+            return
+
+        try:
+            channel = self.channels_data.get(channel_id)
+            if not channel:
+                return
+
+            # Get aggregated sentiment stats for this channel
+            sentiment_stats = await self.db.get_channel_sentiment(channel_id, limit_videos=20)
+
+            # Update widget with sentiment data
+            self.call_after_refresh(
+                widget.update_sentiment,
+                channel.name,
+                sentiment_stats
             )
         except Exception as e:
             # Silently fail
