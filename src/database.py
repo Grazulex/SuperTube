@@ -1,6 +1,7 @@
 """Database manager for caching YouTube statistics"""
 
 import json
+import zlib
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any
 from pathlib import Path
@@ -26,6 +27,34 @@ class DatabaseManager:
     def _ensure_data_dir(self):
         """Ensure the data directory exists"""
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
+
+    def _compress_stats_data(self, stats_list: List[Dict[str, Any]]) -> bytes:
+        """
+        Compress a list of stats dictionaries using zlib
+
+        Args:
+            stats_list: List of stat dictionaries to compress
+
+        Returns:
+            Compressed data as bytes
+        """
+        json_data = json.dumps(stats_list)
+        compressed = zlib.compress(json_data.encode('utf-8'), level=9)
+        return compressed
+
+    def _decompress_stats_data(self, compressed_data: bytes) -> List[Dict[str, Any]]:
+        """
+        Decompress zlib-compressed stats data
+
+        Args:
+            compressed_data: Compressed data bytes
+
+        Returns:
+            List of stat dictionaries
+        """
+        decompressed = zlib.decompress(compressed_data)
+        json_data = decompressed.decode('utf-8')
+        return json.loads(json_data)
 
     async def initialize(self):
         """Create database tables if they don't exist"""
@@ -90,6 +119,31 @@ class DatabaseManager:
                 )
             """)
 
+            # Archive tables for long-term compressed storage
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS stats_history_archive (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    channel_id TEXT NOT NULL,
+                    period_start TEXT NOT NULL,
+                    period_end TEXT NOT NULL,
+                    compressed_data BLOB NOT NULL,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY (channel_id) REFERENCES channels(id)
+                )
+            """)
+
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS video_stats_history_archive (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    video_id TEXT NOT NULL,
+                    period_start TEXT NOT NULL,
+                    period_end TEXT NOT NULL,
+                    compressed_data BLOB NOT NULL,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY (video_id) REFERENCES videos(id)
+                )
+            """)
+
             # Create indexes for better query performance
             await db.execute("""
                 CREATE INDEX IF NOT EXISTS idx_videos_channel
@@ -104,6 +158,17 @@ class DatabaseManager:
             await db.execute("""
                 CREATE INDEX IF NOT EXISTS idx_video_stats
                 ON video_stats_history(video_id, timestamp)
+            """)
+
+            # Archive table indexes
+            await db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_stats_archive
+                ON stats_history_archive(channel_id, period_start, period_end)
+            """)
+
+            await db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_video_stats_archive
+                ON video_stats_history_archive(video_id, period_start, period_end)
             """)
 
             # Alerts table
@@ -392,7 +457,8 @@ class DatabaseManager:
 
     async def get_channel_history(self, channel_id: str, days: int = 30) -> List[ChannelStats]:
         """
-        Get historical statistics for a channel
+        Get historical statistics for a channel.
+        Queries both active (hot) and archived (cold) data transparently.
 
         Args:
             channel_id: YouTube channel ID
@@ -406,6 +472,8 @@ class DatabaseManager:
 
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
+
+            # Get hot data (active stats)
             async with db.execute("""
                 SELECT channel_id, timestamp, subscriber_count, view_count, video_count
                 FROM stats_history
@@ -420,14 +488,44 @@ class DatabaseManager:
                         view_count=row['view_count'],
                         video_count=row['video_count']
                     ))
+
+            # Get cold data (archived stats) if period extends beyond active data
+            async with db.execute("""
+                SELECT channel_id, period_start, period_end, compressed_data
+                FROM stats_history_archive
+                WHERE channel_id = ? AND period_end >= ?
+                ORDER BY period_start ASC
+            """, (channel_id, since.isoformat())) as cursor:
+                async for row in cursor:
+                    # Decompress and add archived stats
+                    archived_stats = self._decompress_stats_data(row['compressed_data'])
+                    for stat_dict in archived_stats:
+                        # Filter by date range
+                        stat_timestamp = datetime.fromisoformat(stat_dict['timestamp'])
+                        if stat_timestamp >= since:
+                            stats.append(ChannelStats(
+                                channel_id=row['channel_id'],
+                                timestamp=stat_timestamp,
+                                subscriber_count=stat_dict['subscriber_count'],
+                                view_count=stat_dict['view_count'],
+                                video_count=stat_dict['video_count']
+                            ))
+
+        # Sort all stats by timestamp
+        stats.sort(key=lambda s: s.timestamp)
         return stats
 
-    async def cleanup_old_history(self, days: int = 90) -> int:
+    async def cleanup_old_history(self, days: int = 365) -> int:
         """
-        Remove statistics older than specified days
+        Remove statistics older than specified days.
+        Default is 365 days (1 year) to support long-term retention.
+
+        NOTE: This should typically NOT be called directly.
+        Use archive_old_data() instead to archive data >90 days,
+        and only cleanup archived data >365 days.
 
         Args:
-            days: Keep history for this many days
+            days: Keep history for this many days (default: 365)
 
         Returns:
             Number of rows deleted
@@ -441,6 +539,156 @@ class DatabaseManager:
             deleted = cursor.rowcount
             await db.commit()
             return deleted
+
+    async def archive_old_data(self, days: int = 90) -> Dict[str, int]:
+        """
+        Archive statistics older than specified days to compressed archive tables.
+        Groups data by week for efficient compression.
+
+        Args:
+            days: Archive data older than this many days (default: 90)
+
+        Returns:
+            Dictionary with counts: {'channel_stats_archived': N, 'video_stats_archived': M}
+        """
+        cutoff = datetime.utcnow() - timedelta(days=days)
+        channel_stats_count = 0
+        video_stats_count = 0
+
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+
+            # Archive channel stats by channel and weekly periods
+            # Get all unique channels with old data
+            async with db.execute("""
+                SELECT DISTINCT channel_id FROM stats_history
+                WHERE timestamp < ?
+            """, (cutoff.isoformat(),)) as cursor:
+                channel_ids = [row['channel_id'] async for row in cursor]
+
+            for channel_id in channel_ids:
+                # Get old stats for this channel
+                async with db.execute("""
+                    SELECT * FROM stats_history
+                    WHERE channel_id = ? AND timestamp < ?
+                    ORDER BY timestamp ASC
+                """, (channel_id, cutoff.isoformat())) as cursor:
+                    stats_rows = await cursor.fetchall()
+
+                if not stats_rows:
+                    continue
+
+                # Group by weeks
+                weekly_groups = {}
+                for row in stats_rows:
+                    timestamp = datetime.fromisoformat(row['timestamp'])
+                    # Get start of week (Monday)
+                    week_start = timestamp - timedelta(days=timestamp.weekday())
+                    week_start = week_start.replace(hour=0, minute=0, second=0, microsecond=0)
+                    week_key = week_start.isoformat()
+
+                    if week_key not in weekly_groups:
+                        weekly_groups[week_key] = []
+
+                    weekly_groups[week_key].append({
+                        'timestamp': row['timestamp'],
+                        'subscriber_count': row['subscriber_count'],
+                        'view_count': row['view_count'],
+                        'video_count': row['video_count']
+                    })
+
+                # Compress and save each weekly group
+                for week_start, stats_list in weekly_groups.items():
+                    week_end = (datetime.fromisoformat(week_start) + timedelta(days=7)).isoformat()
+                    compressed = self._compress_stats_data(stats_list)
+
+                    await db.execute("""
+                        INSERT INTO stats_history_archive
+                        (channel_id, period_start, period_end, compressed_data, created_at)
+                        VALUES (?, ?, ?, ?, ?)
+                    """, (
+                        channel_id,
+                        week_start,
+                        week_end,
+                        compressed,
+                        datetime.utcnow().isoformat()
+                    ))
+                    channel_stats_count += len(stats_list)
+
+            # Archive video stats by video and weekly periods
+            # Get all unique videos with old data
+            async with db.execute("""
+                SELECT DISTINCT video_id FROM video_stats_history
+                WHERE timestamp < ?
+            """, (cutoff.isoformat(),)) as cursor:
+                video_ids = [row['video_id'] async for row in cursor]
+
+            for video_id in video_ids:
+                # Get old stats for this video
+                async with db.execute("""
+                    SELECT * FROM video_stats_history
+                    WHERE video_id = ? AND timestamp < ?
+                    ORDER BY timestamp ASC
+                """, (video_id, cutoff.isoformat())) as cursor:
+                    stats_rows = await cursor.fetchall()
+
+                if not stats_rows:
+                    continue
+
+                # Group by weeks
+                weekly_groups = {}
+                for row in stats_rows:
+                    timestamp = datetime.fromisoformat(row['timestamp'])
+                    # Get start of week (Monday)
+                    week_start = timestamp - timedelta(days=timestamp.weekday())
+                    week_start = week_start.replace(hour=0, minute=0, second=0, microsecond=0)
+                    week_key = week_start.isoformat()
+
+                    if week_key not in weekly_groups:
+                        weekly_groups[week_key] = []
+
+                    weekly_groups[week_key].append({
+                        'timestamp': row['timestamp'],
+                        'view_count': row['view_count'],
+                        'like_count': row['like_count'],
+                        'comment_count': row['comment_count']
+                    })
+
+                # Compress and save each weekly group
+                for week_start, stats_list in weekly_groups.items():
+                    week_end = (datetime.fromisoformat(week_start) + timedelta(days=7)).isoformat()
+                    compressed = self._compress_stats_data(stats_list)
+
+                    await db.execute("""
+                        INSERT INTO video_stats_history_archive
+                        (video_id, period_start, period_end, compressed_data, created_at)
+                        VALUES (?, ?, ?, ?, ?)
+                    """, (
+                        video_id,
+                        week_start,
+                        week_end,
+                        compressed,
+                        datetime.utcnow().isoformat()
+                    ))
+                    video_stats_count += len(stats_list)
+
+            # Delete archived data from main tables
+            await db.execute("""
+                DELETE FROM stats_history
+                WHERE timestamp < ?
+            """, (cutoff.isoformat(),))
+
+            await db.execute("""
+                DELETE FROM video_stats_history
+                WHERE timestamp < ?
+            """, (cutoff.isoformat(),))
+
+            await db.commit()
+
+        return {
+            'channel_stats_archived': channel_stats_count,
+            'video_stats_archived': video_stats_count
+        }
 
     async def save_video_stats(self, videos: List[Video]) -> None:
         """
@@ -506,7 +754,8 @@ class DatabaseManager:
 
     async def get_video_history(self, video_id: str, days: int = 30) -> List[VideoStats]:
         """
-        Get historical statistics for a video
+        Get historical statistics for a video.
+        Queries both active (hot) and archived (cold) data transparently.
 
         Args:
             video_id: YouTube video ID
@@ -520,6 +769,8 @@ class DatabaseManager:
 
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
+
+            # Get hot data (active stats)
             async with db.execute("""
                 SELECT video_id, timestamp, view_count, like_count, comment_count
                 FROM video_stats_history
@@ -534,6 +785,31 @@ class DatabaseManager:
                         like_count=row['like_count'],
                         comment_count=row['comment_count']
                     ))
+
+            # Get cold data (archived stats) if period extends beyond active data
+            async with db.execute("""
+                SELECT video_id, period_start, period_end, compressed_data
+                FROM video_stats_history_archive
+                WHERE video_id = ? AND period_end >= ?
+                ORDER BY period_start ASC
+            """, (video_id, since.isoformat())) as cursor:
+                async for row in cursor:
+                    # Decompress and add archived stats
+                    archived_stats = self._decompress_stats_data(row['compressed_data'])
+                    for stat_dict in archived_stats:
+                        # Filter by date range
+                        stat_timestamp = datetime.fromisoformat(stat_dict['timestamp'])
+                        if stat_timestamp >= since:
+                            stats.append(VideoStats(
+                                video_id=row['video_id'],
+                                timestamp=stat_timestamp,
+                                view_count=stat_dict['view_count'],
+                                like_count=stat_dict['like_count'],
+                                comment_count=stat_dict['comment_count']
+                            ))
+
+        # Sort all stats by timestamp
+        stats.sort(key=lambda s: s.timestamp)
         return stats
 
     async def detect_changes(self, channel_id: str, new_channel: Channel, new_videos: List[Video]) -> ChangeDetection:
@@ -1111,3 +1387,113 @@ class DatabaseManager:
                     videos_analyzed=len(video_ids),
                     videos_with_negative_feedback=videos_with_negative[:5]  # Top 5
                 )
+
+    async def export_database(self, output_path: str) -> Dict[str, Any]:
+        """
+        Export complete database to a SQL file for backup.
+
+        Args:
+            output_path: Path where to save the export file
+
+        Returns:
+            Dictionary with export metadata
+        """
+        import shutil
+        from pathlib import Path
+
+        # Create backup directory if needed
+        output_file = Path(output_path)
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+
+        # Copy database file
+        shutil.copy2(self.db_path, output_path)
+
+        # Get database stats
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+
+            stats = {}
+
+            # Count records in each table
+            for table in ['channels', 'videos', 'stats_history', 'video_stats_history',
+                         'stats_history_archive', 'video_stats_history_archive',
+                         'alerts', 'comments']:
+                async with db.execute(f"SELECT COUNT(*) as count FROM {table}") as cursor:
+                    row = await cursor.fetchone()
+                    stats[f'{table}_count'] = row['count']
+
+            # Get database size
+            db_size = Path(self.db_path).stat().st_size
+            export_size = Path(output_path).stat().st_size
+
+            return {
+                'export_path': output_path,
+                'export_timestamp': datetime.utcnow().isoformat(),
+                'database_size_bytes': db_size,
+                'export_size_bytes': export_size,
+                'tables_stats': stats
+            }
+
+    async def purge_old_data(self,
+                           purge_stats_days: Optional[int] = None,
+                           purge_archive_days: Optional[int] = None,
+                           purge_alerts_days: Optional[int] = None) -> Dict[str, int]:
+        """
+        Manual purge of old data with granular control.
+
+        Args:
+            purge_stats_days: Delete stats older than this many days (optional)
+            purge_archive_days: Delete archives older than this many days (optional)
+            purge_alerts_days: Delete alerts older than this many days (optional)
+
+        Returns:
+            Dictionary with deletion counts for each table
+        """
+        deleted_counts = {}
+
+        async with aiosqlite.connect(self.db_path) as db:
+            # Purge old stats
+            if purge_stats_days is not None:
+                cutoff = datetime.utcnow() - timedelta(days=purge_stats_days)
+
+                cursor = await db.execute("""
+                    DELETE FROM stats_history
+                    WHERE timestamp < ?
+                """, (cutoff.isoformat(),))
+                deleted_counts['stats_history'] = cursor.rowcount
+
+                cursor = await db.execute("""
+                    DELETE FROM video_stats_history
+                    WHERE timestamp < ?
+                """, (cutoff.isoformat(),))
+                deleted_counts['video_stats_history'] = cursor.rowcount
+
+            # Purge old archives
+            if purge_archive_days is not None:
+                cutoff = datetime.utcnow() - timedelta(days=purge_archive_days)
+
+                cursor = await db.execute("""
+                    DELETE FROM stats_history_archive
+                    WHERE period_end < ?
+                """, (cutoff.isoformat(),))
+                deleted_counts['stats_history_archive'] = cursor.rowcount
+
+                cursor = await db.execute("""
+                    DELETE FROM video_stats_history_archive
+                    WHERE period_end < ?
+                """, (cutoff.isoformat(),))
+                deleted_counts['video_stats_history_archive'] = cursor.rowcount
+
+            # Purge old alerts
+            if purge_alerts_days is not None:
+                cutoff = datetime.utcnow() - timedelta(days=purge_alerts_days)
+
+                cursor = await db.execute("""
+                    DELETE FROM alerts
+                    WHERE triggered_at < ?
+                """, (cutoff.isoformat(),))
+                deleted_counts['alerts'] = cursor.rowcount
+
+            await db.commit()
+
+        return deleted_counts
