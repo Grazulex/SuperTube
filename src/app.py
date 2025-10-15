@@ -51,30 +51,34 @@ class StatusBar(Static):
     def set_status(self, message: str) -> None:
         """Set status message"""
         self.status_message = message
-        self.update_display()
+        self._render_display()
 
     def set_last_update(self, timestamp: datetime) -> None:
         """Set last update timestamp"""
         self.last_update = timestamp
-        self.update_display()
+        self._render_display()
 
     def set_auto_refresh_status(self, status: str) -> None:
         """Set auto-refresh status"""
         self.auto_refresh_status = status
-        self.update_display()
+        self._render_display()
 
     def set_quota_status(self, status: str) -> None:
         """Set quota status"""
         self.quota_status = status
-        self.update_display()
+        self._render_display()
 
     def update_display(self) -> None:
-        """Update the status bar display"""
+        """Update the status bar display (called periodically)"""
         # Request app to update auto-refresh info
         app = self.app
         if hasattr(app, 'update_status_bar_auto_refresh'):
             app.update_status_bar_auto_refresh()
 
+        self._render_display()
+
+    def _render_display(self) -> None:
+        """Render the status bar text"""
         parts = []
 
         # Last update time
