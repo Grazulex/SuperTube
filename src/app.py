@@ -25,6 +25,8 @@ from .alerts import AlertManager
 from .temporal_analysis import TemporalAnalyzer
 from .title_tag_analyzer import TitleTagAnalyzer
 from .growth_predictor import GrowthPredictor
+from .quota_manager import QuotaManager
+from .auto_refresh import AutoRefreshManager
 
 # Version number for deployment tracking
 VERSION = "2.4.0"
@@ -262,6 +264,9 @@ class SuperTubeApp(App):
         # Alert system
         self.alert_manager: Optional[AlertManager] = None
         self.active_alerts: List = []
+        # Auto-refresh system
+        self.quota_manager: Optional[QuotaManager] = None
+        self.auto_refresh_manager: Optional[AutoRefreshManager] = None
 
     def compose(self) -> ComposeResult:
         """Create child widgets - Lazydocker-style layout"""
@@ -330,6 +335,23 @@ class SuperTubeApp(App):
         # Initialize alert system with default thresholds
         self.alert_manager = AlertManager(AlertManager.get_default_thresholds())
         self.status_bar.set_status("Alert system initialized")
+
+        # Initialize quota manager and auto-refresh
+        auto_refresh_config = self.config.settings.auto_refresh_config
+        self.quota_manager = QuotaManager(
+            daily_limit=auto_refresh_config.quota_limit,
+            safety_threshold=auto_refresh_config.quota_safety_threshold
+        )
+        self.auto_refresh_manager = AutoRefreshManager(
+            refresh_callback=self.load_data,
+            quota_manager=self.quota_manager,
+            default_interval_minutes=auto_refresh_config.interval_minutes
+        )
+
+        # Start auto-refresh if enabled in config
+        if auto_refresh_config.enabled:
+            await self.auto_refresh_manager.start()
+            self.status_bar.set_status("Auto-refresh enabled")
 
         # Load initial data
         self.load_data()

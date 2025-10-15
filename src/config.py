@@ -15,11 +15,21 @@ class ChannelConfig:
 
 
 @dataclass
+class AutoRefreshSettings:
+    """Auto-refresh configuration"""
+    enabled: bool = False
+    interval_minutes: int = 30
+    quota_limit: int = 10000
+    quota_safety_threshold: float = 0.90
+
+
+@dataclass
 class AppSettings:
     """Application settings"""
     cache_ttl: int = 3600
     max_videos: int = 50
-    auto_refresh: int = 0
+    auto_refresh: int = 0  # Legacy field (kept for compatibility)
+    auto_refresh_config: AutoRefreshSettings = None
 
 
 @dataclass
@@ -66,10 +76,21 @@ class Config:
 
         # Parse settings
         settings_data = data.get('settings', {})
+
+        # Parse auto-refresh config
+        auto_refresh_data = settings_data.get('auto_refresh_config', {})
+        auto_refresh_config = AutoRefreshSettings(
+            enabled=auto_refresh_data.get('enabled', False),
+            interval_minutes=auto_refresh_data.get('interval_minutes', 30),
+            quota_limit=auto_refresh_data.get('quota_limit', 10000),
+            quota_safety_threshold=auto_refresh_data.get('quota_safety_threshold', 0.90)
+        )
+
         settings = AppSettings(
             cache_ttl=settings_data.get('cache_ttl', 3600),
             max_videos=settings_data.get('max_videos', 50),
-            auto_refresh=settings_data.get('auto_refresh', 0)
+            auto_refresh=settings_data.get('auto_refresh', 0),
+            auto_refresh_config=auto_refresh_config
         )
 
         return cls(channels=channels, settings=settings)
