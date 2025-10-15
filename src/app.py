@@ -510,6 +510,15 @@ class SuperTubeApp(App):
         """Display the main dashboard - Feed data to panels"""
         self.current_view = "dashboard"
 
+        # Check if dashboard DOM exists, if not, recreate it
+        needs_recreation = False
+        try:
+            self.query_one("#main_view_panel", MainViewPanel)
+        except:
+            # DOM was removed (e.g., from help screen), recreate it
+            self._recreate_dashboard_dom()
+            needs_recreation = True
+
         if not self.channels_data:
             # Show error in main view if no data
             try:
@@ -521,6 +530,14 @@ class SuperTubeApp(App):
                 pass
             return
 
+        # If we just recreated the DOM, wait for widgets to mount before updating
+        if needs_recreation:
+            self.call_after_refresh(self._populate_dashboard)
+        else:
+            self._populate_dashboard()
+
+    def _populate_dashboard(self) -> None:
+        """Populate dashboard panels with data"""
         # Feed channels to ChannelsListPanel
         channels_list = list(self.channels_data.values())
         try:
@@ -532,18 +549,41 @@ class SuperTubeApp(App):
         # Setup watchers for reactive updates
         self._setup_panel_watchers()
 
+    def _recreate_dashboard_dom(self) -> None:
+        """Recreate dashboard DOM structure (used when returning from help)"""
+        container = self.query_one("#main_container", Horizontal)
+        container.remove_children()
+
+        # Recreate left sidebar with 3 panels
+        left_sidebar = Vertical(classes="left-sidebar")
+        left_sidebar.mount(ChannelsListPanel(classes="channels-panel", id="channels_panel"))
+        left_sidebar.mount(VideosListPanel(classes="videos-panel", id="videos_panel"))
+        left_sidebar.mount(VideoDetailsPanel(classes="details-panel", id="details_panel"))
+        container.mount(left_sidebar)
+
+        # Recreate main view panel
+        container.mount(MainViewPanel(classes="main-view-panel", id="main_view_panel"))
+
     def _setup_panel_watchers(self) -> None:
         """Setup reactive connections between panels"""
         try:
             channels_panel = self.query_one("#channels_panel", ChannelsListPanel)
 
+            # Only trigger selection if we have channels data
+            if not self.channels_data:
+                return
+
             # Manually trigger initial selection
             # Force reload even if channel was already selected (for refresh)
-            if channels_panel.selected_channel_id:
-                self._on_channel_selected(channels_panel.selected_channel_id)
-            elif self.selected_channel_id:
-                # Use previously selected channel if any
-                self._on_channel_selected(self.selected_channel_id)
+            selected_id = channels_panel.selected_channel_id or self.selected_channel_id
+
+            # If no selection yet, select first channel
+            if not selected_id and self.channels_data:
+                first_channel_id = list(self.channels_data.keys())[0]
+                selected_id = first_channel_id
+
+            if selected_id:
+                self._on_channel_selected(selected_id)
 
         except Exception as e:
             self.status_bar.set_status(f"Error setting up panels: {e}")
