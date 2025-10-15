@@ -28,9 +28,14 @@ services:
       - ./config:/app/config     # Mount config directory (read-only for archiver)
       - ./data:/app/data         # Mount data directory for SQLite cache
       - /etc/localtime:/etc/localtime:ro  # Mount host timezone
-    command: >
-      sh -c "
-      echo '0 3 * * * cd /app && python src/archiver_cron.py >> /app/data/archive.log 2>&1' > /etc/crontabs/root &&
-      crond -f -l 2
-      "
+    entrypoint: ["/bin/bash"]  # Override default entrypoint
+    command:
+      - -c
+      - |
+        apt-get update && apt-get install -y --no-install-recommends cron
+        echo '0 3 * * * cd /app && python src/archiver_cron.py >> /app/data/archive.log 2>&1' > /etc/cron.d/supertube-archiver
+        chmod 0644 /etc/cron.d/supertube-archiver
+        crontab /etc/cron.d/supertube-archiver
+        touch /var/log/cron.log
+        cron && tail -f /var/log/cron.log
     restart: unless-stopped  # Auto-restart to ensure cron keeps running

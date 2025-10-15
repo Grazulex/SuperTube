@@ -20,10 +20,10 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-# Add src to path
-sys.path.insert(0, str(Path(__file__).parent))
+# Add parent directory to path to enable imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from database import DatabaseManager
+from src.database import DatabaseManager
 
 
 async def run_archival(days: int = 90, dry_run: bool = False):
