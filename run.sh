@@ -144,6 +144,16 @@ main() {
     build_image "$1"
 
     echo ""
+    # Start archiver service in background if not already running
+    if ! docker ps --format '{{.Names}}' | grep -q "supertube-archiver"; then
+        print_info "Starting archiver service in background..."
+        $DOCKER_COMPOSE up -d archiver
+        print_success "Archiver service started (runs daily at 3 AM)"
+    else
+        print_info "Archiver service already running"
+    fi
+
+    echo ""
     print_info "Starting SuperTube..."
     echo ""
     print_info "Keyboard shortcuts:"
@@ -158,6 +168,8 @@ main() {
     # Clean exit
     echo ""
     print_success "SuperTube exited successfully"
+    print_info "Archiver service continues running in background"
+    print_info "To stop it: docker-compose stop archiver"
 }
 
 # Handle Ctrl+C gracefully
