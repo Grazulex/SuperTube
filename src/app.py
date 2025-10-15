@@ -33,16 +33,20 @@ VERSION = "2.4.0"
 
 
 class StatusBar(Static):
-    """Status bar showing last update time and quota info"""
+    """Status bar showing last update time, quota info, and auto-refresh status"""
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.last_update: Optional[datetime] = None
         self.status_message: str = "Ready"
+        self.auto_refresh_status: str = ""
+        self.quota_status: str = ""
 
     def on_mount(self) -> None:
         """Update display when mounted"""
         self.update_display()
+        # Set up periodic refresh of status bar (every 10 seconds)
+        self.set_interval(10, self.update_display)
 
     def set_status(self, message: str) -> None:
         """Set status message"""
@@ -54,13 +58,44 @@ class StatusBar(Static):
         self.last_update = timestamp
         self.update_display()
 
+    def set_auto_refresh_status(self, status: str) -> None:
+        """Set auto-refresh status"""
+        self.auto_refresh_status = status
+        self.update_display()
+
+    def set_quota_status(self, status: str) -> None:
+        """Set quota status"""
+        self.quota_status = status
+        self.update_display()
+
     def update_display(self) -> None:
         """Update the status bar display"""
+        # Request app to update auto-refresh info
+        app = self.app
+        if hasattr(app, 'update_status_bar_auto_refresh'):
+            app.update_status_bar_auto_refresh()
+
+        parts = []
+
+        # Last update time
         if self.last_update:
             time_str = self.last_update.strftime("%H:%M:%S")
-            self.update(f"[dim]Last update: {time_str} | {self.status_message}[/dim]")
-        else:
-            self.update(f"[dim]{self.status_message}[/dim]")
+            parts.append(f"Last update: {time_str}")
+
+        # Status message
+        if self.status_message:
+            parts.append(self.status_message)
+
+        # Auto-refresh status
+        if self.auto_refresh_status:
+            parts.append(self.auto_refresh_status)
+
+        # Quota status (only show if quota manager is active)
+        if self.quota_status:
+            parts.append(self.quota_status)
+
+        status_text = " | ".join(parts) if parts else "Ready"
+        self.update(f"[dim]{status_text}[/dim]")
 
 
 class SuperTubeApp(App):
@@ -381,16 +416,29 @@ class SuperTubeApp(App):
                     # Fetch from API - no stats for today yet
                     self.status_bar.set_status(f"Collecting today's stats for {channel_config.name}...")
 
+                    # Record quota usage for channel stats
+                    if self.quota_manager:
+                        self.quota_manager.record_usage('channel_stats')
+
                     channel = await asyncio.to_thread(
                         self.youtube_client.get_channel_stats,
                         channel_config.channel_id
                     )
+
+                    # Record quota usage for playlist items
+                    if self.quota_manager:
+                        self.quota_manager.record_usage('channel_videos')
 
                     videos = await asyncio.to_thread(
                         self.youtube_client.get_channel_videos,
                         channel_config.channel_id,
                         self.config.settings.max_videos
                     )
+
+                    # Record quota usage for video details (batched)
+                    if self.quota_manager:
+                        video_batches = (len(videos) + 49) // 50
+                        self.quota_manager.record_usage('video_details', cost=video_batches)
 
                     # Detect changes before saving
                     changes = await self.db.detect_changes(channel_config.channel_id, channel, videos)
@@ -435,6 +483,21 @@ class SuperTubeApp(App):
 
         # Show dashboard
         self.show_dashboard()
+
+    def update_status_bar_auto_refresh(self) -> None:
+        """Update status bar with auto-refresh and quota information"""
+        if not self.status_bar:
+            return
+
+        # Get auto-refresh status
+        if self.auto_refresh_manager:
+            auto_status = self.auto_refresh_manager.get_status_display()
+            self.status_bar.set_auto_refresh_status(auto_status)
+
+        # Get quota status
+        if self.quota_manager:
+            quota_status = self.quota_manager.get_status_summary()
+            self.status_bar.set_quota_status(quota_status)
 
     def show_dashboard(self) -> None:
         """Display the main dashboard - Feed data to panels"""

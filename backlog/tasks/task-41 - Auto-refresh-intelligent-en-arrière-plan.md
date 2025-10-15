@@ -1,9 +1,11 @@
 ---
 id: task-41
 title: Auto-refresh intelligent en arrière-plan
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@claude'
 created_date: '2025-10-15 16:51'
+updated_date: '2025-10-15 17:20'
 labels: []
 dependencies: []
 priority: medium
@@ -24,3 +26,16 @@ Implémenter un système de refresh automatique intelligent qui collecte les don
 - [ ] #5 Indicateur visuel du dernier refresh et prochain refresh
 - [ ] #6 Gestion intelligente des quotas API (ne pas gaspiller)
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. Analyser le code actuel pour comprendre le système de refresh existant
+2. Créer quota_manager.py pour tracking des quotas API
+3. Créer auto_refresh.py avec AutoRefreshManager
+4. Ajouter configuration dans config (ou créer config.py si nécessaire)
+5. Intégrer AutoRefreshManager dans app.py
+6. Ajouter indicateurs visuels dans status bar
+7. Implémenter le mode watch (touche w)
+8. Tester le système complet
+<!-- SECTION:PLAN:END -->
