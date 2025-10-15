@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2025-10-15 16:51'
-updated_date: '2025-10-15 17:20'
+updated_date: '2025-10-15 17:30'
 labels: []
 dependencies: []
 priority: medium
@@ -19,12 +19,12 @@ Implémenter un système de refresh automatique intelligent qui collecte les don
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Ajouter option de configuration pour activer/désactiver auto-refresh
-- [ ] #2 Implémenter refresh automatique en arrière-plan (non-bloquant)
-- [ ] #3 Système de priorité: refresh plus fréquent pour chaînes actives
-- [ ] #4 Mode 'watch' pour monitoring temps réel d'une chaîne
-- [ ] #5 Indicateur visuel du dernier refresh et prochain refresh
-- [ ] #6 Gestion intelligente des quotas API (ne pas gaspiller)
+- [x] #1 Ajouter option de configuration pour activer/désactiver auto-refresh
+- [x] #2 Implémenter refresh automatique en arrière-plan (non-bloquant)
+- [x] #3 Système de priorité: refresh plus fréquent pour chaînes actives
+- [x] #4 Mode 'watch' pour monitoring temps réel d'une chaîne
+- [x] #5 Indicateur visuel du dernier refresh et prochain refresh
+- [x] #6 Gestion intelligente des quotas API (ne pas gaspiller)
 <!-- AC:END -->
 
 ## Implementation Plan

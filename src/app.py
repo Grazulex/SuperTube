@@ -279,6 +279,9 @@ class SuperTubeApp(App):
         # Top/Flop controls (shown in context)
         Binding("p", "cycle_period", "Period", show=False),
         Binding("m", "cycle_metric", "Metric", show=False),
+        # Auto-refresh controls
+        Binding("A", "toggle_auto_refresh", "Auto-Refresh", show=False),
+        Binding("W", "toggle_watch_mode", "Watch Mode", show=False),
         # Note: / is handled in on_key() method
     ]
 
@@ -659,6 +662,10 @@ class SuperTubeApp(App):
   p          - Cycle period (7d → 30d → 90d)
   m          - Cycle metric (views → likes → comments → engagement)
 
+[bold]Auto-Refresh Controls:[/bold]
+  Shift+A    - Toggle auto-refresh on/off
+  Shift+W    - Toggle watch mode for selected channel (refresh every 5min)
+
 [bold]Video Filters (press 'f'):[/bold]
   None              - Show all videos
   Recent (7 days)   - Videos from last week
@@ -1036,6 +1043,50 @@ class SuperTubeApp(App):
                 self.status_bar.set_status(f"Comparison: {metric_desc}")
         except:
             return
+
+    def action_toggle_auto_refresh(self) -> None:
+        """Toggle auto-refresh on/off"""
+        if not self.auto_refresh_manager:
+            self.status_bar.set_status("Auto-refresh not available")
+            return
+
+        # Create async task to toggle
+        async def _toggle():
+            if self.auto_refresh_manager.enabled:
+                await self.auto_refresh_manager.stop()
+                self.status_bar.set_status("Auto-refresh disabled")
+            else:
+                await self.auto_refresh_manager.start()
+                self.status_bar.set_status("Auto-refresh enabled")
+
+        # Run the async task
+        import asyncio
+        asyncio.create_task(_toggle())
+
+    def action_toggle_watch_mode(self) -> None:
+        """Toggle watch mode for currently selected channel"""
+        if not self.auto_refresh_manager:
+            self.status_bar.set_status("Auto-refresh not available")
+            return
+
+        if not self.selected_channel_id:
+            self.status_bar.set_status("Select a channel first to enable watch mode")
+            return
+
+        # Create async task to toggle watch mode
+        async def _toggle_watch():
+            if self.auto_refresh_manager.watch_mode:
+                await self.auto_refresh_manager.disable_watch_mode()
+                self.status_bar.set_status("Watch mode disabled")
+            else:
+                await self.auto_refresh_manager.enable_watch_mode(self.selected_channel_id)
+                channel = self.channels_data.get(self.selected_channel_id)
+                channel_name = channel.name if channel else "channel"
+                self.status_bar.set_status(f"Watch mode enabled for {channel_name} (refresh every 5min)")
+
+        # Run the async task
+        import asyncio
+        asyncio.create_task(_toggle_watch())
 
     def on_key(self, event) -> None:
         """Handle key events for special keys like Tab, /, and y"""
