@@ -15,3 +15,22 @@ services:
       - ./data:/app/data         # Mount data directory for SQLite cache
       - /etc/localtime:/etc/localtime:ro  # Mount host timezone
     restart: "no"  # Don't auto-restart (it's an interactive app)
+
+  archiver:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: supertube:latest
+    container_name: supertube-archiver
+    environment:
+      - TZ=Europe/Brussels  # Set timezone to match host
+    volumes:
+      - ./config:/app/config     # Mount config directory (read-only for archiver)
+      - ./data:/app/data         # Mount data directory for SQLite cache
+      - /etc/localtime:/etc/localtime:ro  # Mount host timezone
+    command: >
+      sh -c "
+      echo '0 3 * * * cd /app && python src/archiver_cron.py >> /app/data/archive.log 2>&1' > /etc/crontabs/root &&
+      crond -f -l 2
+      "
+    restart: unless-stopped  # Auto-restart to ensure cron keeps running

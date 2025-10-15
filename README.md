@@ -10,6 +10,7 @@ Track your YouTube channels' performance with real-time statistics, video analyt
 - 📈 **Real-time statistics**: Subscribers, views, video count, engagement metrics
 - 🎥 **Video analytics**: Monitor individual video performance (views, likes, comments)
 - 💾 **Smart caching**: SQLite cache to minimize API quota usage
+- 📦 **Data archival**: Automatic archiving with compression for long-term retention (1 year+)
 - ⚡ **Fast navigation**: Vim-style keyboard shortcuts
 - 🐳 **Docker-ready**: No local Python installation required
 
@@ -108,7 +109,19 @@ channels:
 # Or manually with docker-compose
 docker-compose build
 docker-compose run --rm supertube
+
+# To also enable automatic data archival (recommended for production):
+docker-compose up -d archiver
 ```
+
+**📦 Data Archival Service (Optional)**
+
+The archiver service runs daily at 3 AM to automatically:
+- Archive statistics older than 90 days with compression (~75% space savings)
+- Maintain 1-year data retention
+- Keep active tables optimized
+
+See [ARCHIVER.md](ARCHIVER.md) for detailed documentation.
 
 ### 5. First Run - OAuth Authentication
 
@@ -289,7 +302,18 @@ SQLite database at `data/supertube.db` with tables:
 
 - `channels`: Channel information and current stats
 - `videos`: Video information and stats
-- `stats_history`: Historical snapshots for trend analysis
+- `stats_history`: Historical snapshots for trend analysis (hot data, 0-90 days)
+- `video_stats_history`: Video statistics history (hot data, 0-90 days)
+- `stats_history_archive`: Compressed channel stats archives (cold data, 90+ days)
+- `video_stats_history_archive`: Compressed video stats archives (cold data, 90+ days)
+
+**Data Retention Strategy:**
+- **Hot data** (0-90 days): Stored in regular tables for fast access
+- **Cold data** (90+ days): Automatically archived with zlib compression
+- **Total retention**: 365 days (1 year)
+- **Space savings**: ~75-80% for archived data
+
+See [ARCHIVER.md](ARCHIVER.md) for archival system details.
 
 ## 📝 Roadmap
 

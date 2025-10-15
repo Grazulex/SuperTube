@@ -1,11 +1,11 @@
 ---
 id: task-41
 title: Auto-refresh intelligent en arrière-plan
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2025-10-15 16:51'
-updated_date: '2025-10-15 17:30'
+updated_date: '2025-10-15 17:34'
 labels: []
 dependencies: []
 priority: medium
@@ -39,3 +39,28 @@ Implémenter un système de refresh automatique intelligent qui collecte les don
 7. Implémenter le mode watch (touche w)
 8. Tester le système complet
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Système d'auto-refresh intelligent complété avec succès.
+
+**Fonctionnalités implémentées:**
+
+- QuotaManager pour tracking des quotas API YouTube (10,000 unités/jour)
+- AutoRefreshManager avec boucle asynchrone non-bloquante
+- Configuration YAML pour activer/désactiver et configurer l'intervalle
+- Indicateurs visuels en temps réel dans la status bar
+- Mode watch pour monitoring d'une chaîne spécifique (refresh 5min)
+- Bindings clavier: Shift+A (toggle auto-refresh), Shift+W (watch mode)
+- Système de priorité avec support pour refresh différencié par chaîne
+- Gestion intelligente des quotas avec seuil de sécurité à 90%
+
+**Commits:**
+- a7991df: Add auto-refresh system core infrastructure  
+- b1cdc2a: Add auto-refresh visual indicators and quota tracking
+- f1538b3: Complete task-41: Add watch mode and toggle controls
+- f105038: Fix infinite recursion in StatusBar update_display
+
+**Tests:** Système testé et bugfix appliqué pour résoudre récursion infinie.
+<!-- SECTION:NOTES:END -->

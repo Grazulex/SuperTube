@@ -1,11 +1,11 @@
 ---
 id: task-42
 title: Rétention de données étendue et archivage
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2025-10-15 16:51'
-updated_date: '2025-10-15 18:20'
+updated_date: '2025-10-15 18:21'
 labels: []
 dependencies: []
 priority: medium
