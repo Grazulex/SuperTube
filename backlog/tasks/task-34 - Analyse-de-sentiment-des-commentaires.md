@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2025-10-13 22:47'
-updated_date: '2025-10-15 16:34'
+updated_date: '2025-10-15 16:36'
 labels: []
 dependencies: []
 priority: medium
@@ -24,7 +24,7 @@ Scraper et analyser le sentiment des commentaires pour détecter les problèmes 
 - [x] #3 Agrégation de sentiment par vidéo
 - [x] #4 Identification des vidéos avec feedback négatif
 - [x] #5 Détection de mots-clés dans commentaires
-- [ ] #6 Dashboard de sentiment par chaîne/vidéo
+- [x] #6 Dashboard de sentiment par chaîne/vidéo
 <!-- AC:END -->
 
 ## Implementation Plan

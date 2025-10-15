@@ -7,7 +7,7 @@ from textual.widgets import DataTable, Static, Label
 from textual.containers import Container, Vertical, Horizontal
 from textual.reactive import reactive
 
-from .models import Channel, Video, Alert, VideoFilter
+from .models import Channel, Video, Alert, VideoFilter, Comment, VideoSentiment, ChannelSentiment
 
 
 class DashboardWidget(Static):
@@ -1714,4 +1714,210 @@ class GrowthProjectionPanel(Static):
             return "white"
         else:
             return "red"
+
+
+class CommentsSentimentPanel(Static):
+    """Panel showing comments with sentiment analysis for a video"""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.video_title = ""
+        self.comments: List[Comment] = []
+        self.sentiment_stats: Optional[VideoSentiment] = None
+
+    def compose(self) -> ComposeResult:
+        """Create child widgets"""
+        with Vertical():
+            yield Label("[bold cyan]💬 Comments & Sentiment[/bold cyan]", classes="panel-title")
+            yield Static(id="sentiment_summary", classes="stats-box")
+            yield DataTable(id="comments_table", zebra_stripes=True, cursor_type="row")
+
+    def on_mount(self) -> None:
+        """Initialize the table"""
+        table = self.query_one("#comments_table", DataTable)
+        table.add_column("Author", key="author", width=20)
+        table.add_column("Comment", key="comment", width=50)
+        table.add_column("Sentiment", key="sentiment", width=10)
+        table.add_column("Likes", key="likes", width=8)
+
+    def update_comments(
+        self,
+        video_title: str,
+        comments: List[Comment],
+        sentiment_stats: Optional[VideoSentiment] = None
+    ) -> None:
+        """Update the comments display"""
+        self.video_title = video_title
+        self.comments = comments
+        self.sentiment_stats = sentiment_stats
+
+        # Update summary
+        self._update_summary()
+
+        # Update table
+        self._refresh_table()
+
+    def _update_summary(self) -> None:
+        """Update the sentiment summary stats"""
+        summary = self.query_one("#sentiment_summary", Static)
+
+        if not self.sentiment_stats or self.sentiment_stats.total_comments == 0:
+            summary.update(
+                f"[bold]{self.video_title[:60]}...[/bold]\n"
+                "[dim]No sentiment data available yet[/dim]"
+            )
+            return
+
+        stats = self.sentiment_stats
+
+        # Get sentiment color based on average
+        if stats.avg_sentiment > 0.1:
+            sentiment_color = "green"
+            sentiment_icon = "😊"
+        elif stats.avg_sentiment < -0.1:
+            sentiment_color = "red"
+            sentiment_icon = "😟"
+        else:
+            sentiment_color = "yellow"
+            sentiment_icon = "😐"
+
+        # Build summary display
+        summary_text = f"""[bold]{self.video_title[:60]}...[/bold]
+
+[bold]Sentiment Overview:[/bold]
+Total Comments: [cyan]{stats.total_comments}[/cyan]
+[green]Positive:[/green] {stats.positive_count} ({stats.positive_percent:.1f}%)
+[yellow]Neutral:[/yellow] {stats.neutral_count} ({stats.neutral_percent:.1f}%)
+[red]Negative:[/red] {stats.negative_count} ({stats.negative_percent:.1f}%)
+Overall: [{sentiment_color}]{sentiment_icon} {stats.sentiment_label.title()}[/{sentiment_color}] ([{sentiment_color}]{stats.avg_sentiment:+.2f}[/{sentiment_color}])"""
+
+        # Add top keywords if available
+        if stats.top_keywords:
+            keywords = ", ".join([f"{kw} ({count})" for kw, count in stats.top_keywords[:5]])
+            summary_text += f"\n\n[bold]Top Keywords:[/bold] [dim]{keywords}[/dim]"
+
+        summary.update(summary_text)
+
+    def _refresh_table(self) -> None:
+        """Refresh the comments table"""
+        table = self.query_one("#comments_table", DataTable)
+        table.clear(columns=False)
+
+        if not self.comments:
+            table.add_row(
+                "[dim]No comments[/dim]",
+                "[dim]No comments available for this video[/dim]",
+                "[dim]—[/dim]",
+                "[dim]—[/dim]"
+            )
+            return
+
+        # Sort comments by likes (most liked first)
+        sorted_comments = sorted(self.comments, key=lambda c: c.like_count, reverse=True)
+
+        for comment in sorted_comments[:50]:  # Limit to 50 comments
+            # Truncate author name
+            author = comment.author[:18] + ".." if len(comment.author) > 20 else comment.author
+
+            # Truncate comment text
+            text = comment.text.replace("\n", " ")  # Remove line breaks
+            display_text = text[:47] + "..." if len(text) > 50 else text
+
+            # Format sentiment with color and icon
+            if comment.sentiment_label == "positive":
+                sentiment_display = "[green]😊 Pos[/green]"
+            elif comment.sentiment_label == "negative":
+                sentiment_display = "[red]😟 Neg[/red]"
+            else:
+                sentiment_display = "[yellow]😐 Neu[/yellow]"
+
+            # Format like count
+            if comment.like_count >= 1000:
+                likes_display = f"{comment.like_count / 1000:.1f}K"
+            else:
+                likes_display = str(comment.like_count)
+
+            table.add_row(
+                author,
+                display_text,
+                sentiment_display,
+                f"[dim]{likes_display}[/dim]",
+                key=comment.id
+            )
+
+
+class ChannelSentimentPanel(Static):
+    """Panel showing aggregated sentiment across a channel"""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.channel_name = ""
+        self.sentiment_stats: Optional[ChannelSentiment] = None
+
+    def compose(self) -> ComposeResult:
+        """Create child widgets"""
+        with Vertical():
+            yield Label("[bold cyan]💭 Channel Sentiment Overview[/bold cyan]", classes="panel-title")
+            yield Static(id="channel_sentiment_content", classes="details-content")
+
+    def update_sentiment(
+        self,
+        channel_name: str,
+        sentiment_stats: Optional[ChannelSentiment] = None
+    ) -> None:
+        """Update the channel sentiment display"""
+        self.channel_name = channel_name
+        self.sentiment_stats = sentiment_stats
+
+        content = self.query_one("#channel_sentiment_content", Static)
+
+        if not sentiment_stats or sentiment_stats.total_comments == 0:
+            content.update(
+                f"[bold]{channel_name}[/bold]\n\n"
+                "[dim]No sentiment data available yet.\n"
+                "Comments will be analyzed on next refresh.[/dim]"
+            )
+            return
+
+        stats = sentiment_stats
+
+        # Get overall sentiment color
+        if stats.avg_sentiment > 0.1:
+            sentiment_color = "green"
+            sentiment_icon = "😊"
+        elif stats.avg_sentiment < -0.1:
+            sentiment_color = "red"
+            sentiment_icon = "😟"
+        else:
+            sentiment_color = "yellow"
+            sentiment_icon = "😐"
+
+        # Build display
+        sections = []
+
+        # Overall stats
+        sections.append(
+            f"[bold yellow]📊 Sentiment Summary:[/bold yellow]\n"
+            f"Videos Analyzed: [cyan]{stats.videos_analyzed}[/cyan]\n"
+            f"Total Comments: [cyan]{stats.total_comments:,}[/cyan]\n"
+            f"[green]Positive:[/green] {stats.positive_count:,} ({stats.positive_percent:.1f}%)\n"
+            f"[yellow]Neutral:[/yellow] {stats.neutral_count:,} ({stats.neutral_percent:.1f}%)\n"
+            f"[red]Negative:[/red] {stats.negative_count:,} ({stats.negative_percent:.1f}%)\n"
+            f"Overall: [{sentiment_color}]{sentiment_icon} {stats.sentiment_label.title()}[/{sentiment_color}] "
+            f"([{sentiment_color}]{stats.avg_sentiment:+.2f}[/{sentiment_color}])"
+        )
+
+        # Videos with negative feedback
+        if stats.videos_with_negative_feedback:
+            sections.append(
+                f"[bold red]⚠️  Videos with High Negative Feedback (>40%):[/bold red]\n" +
+                "\n".join([
+                    f"{i}. Video ID: [dim]{vid_id[:15]}...[/dim] - [red]{neg_pct:.1f}%[/red] negative"
+                    for i, (vid_id, neg_pct) in enumerate(stats.videos_with_negative_feedback, 1)
+                ])
+            )
+        else:
+            sections.append("[green]✅ No videos with concerning negative feedback[/green]")
+
+        content.update("\n\n".join(sections))
 
